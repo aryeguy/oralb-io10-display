@@ -35,9 +35,10 @@ The current geometry is deliberately simple and will be redesigned later.
 
 ## Mac bridge
 
-`macos/backend.py` owns CoreBluetooth through Bleak and serves the simulator
-assets over loopback HTTP. A WebSocket pushes each durable state update to all
-browser tabs. BLE callbacks and byte parsing stay behind the state model, so
+`macos/backend.py` owns Bluetooth through Bleak and serves the simulator assets
+over HTTP. A WebSocket pushes each durable state update to all browser tabs.
+By default it binds to loopback; `--lan` or `--host` exposes it to clients on a
+trusted network. BLE callbacks and byte parsing stay behind the state model, so
 the browser never handles Bluetooth protocol bytes directly.
 
 The backend has two live paths:
@@ -56,8 +57,9 @@ k-nearest-neighbour model under `data/`. Prediction uses overlapping windows
 and a short majority vote so transition movements do not immediately paint a
 surface.
 
-This model is calibrated to the user's brush orientation. It is independent of
-the proprietary vendor GRU assets and remains completely local.
+When the private APK assets are installed, the Mac path runs the official Comino
+GRU model. Without them it falls back to the public prior and optional local
+calibration. Neither model is required by the browser client.
 
 ## Why mouth coverage is 16 entries right now
 

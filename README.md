@@ -16,7 +16,7 @@ Double-click:
 start_macos.command
 ```
 
-The first launch creates a local Python environment, installs the two required
+The first launch creates a local Python environment, installs the required
 packages, starts the Bluetooth bridge, and opens:
 
 ```text
@@ -56,7 +56,13 @@ Useful options:
 ```bash
 .venv/bin/python macos/backend.py --mock --open
 .venv/bin/python macos/backend.py --port 9000 --open
+.venv/bin/python macos/backend.py --lan       # serve clients on the LAN
 ```
+
+For Raspberry Pi and Windows server setup, see
+[docs/network-deployment.md](docs/network-deployment.md). The bridge is the
+server and any browser on the same network is a client; the browser needs no
+Bluetooth access of its own.
 
 ## What the Mac version includes
 

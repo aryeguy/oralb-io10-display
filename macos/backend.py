@@ -686,7 +686,16 @@ def create_app(bridge: OralBBridge, open_browser: bool = False, port: int = 8765
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="interface to bind (use 0.0.0.0 or --lan for another device on the LAN)",
+    )
+    parser.add_argument(
+        "--lan",
+        action="store_true",
+        help="bind on all interfaces so a Raspberry Pi/PC can serve other clients",
+    )
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--mock", action="store_true", help="start with the virtual brush")
     parser.add_argument("--open", action="store_true", help="open the browser after startup")
@@ -695,7 +704,8 @@ def main() -> None:
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
     bridge = OralBBridge("mock" if args.mock else "live")
     app = create_app(bridge, open_browser=args.open, port=args.port)
-    web.run_app(app, host=args.host, port=args.port, print=lambda line: print(f"Oral-B Live: {line}"))
+    bind_host = "0.0.0.0" if args.lan else args.host
+    web.run_app(app, host=bind_host, port=args.port, print=lambda line: print(f"Oral-B Live: {line}"))
 
 
 if __name__ == "__main__":

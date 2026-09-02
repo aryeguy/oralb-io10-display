@@ -10,7 +10,7 @@ if [[ ! -x "$ENV_DIR/bin/python" ]]; then
   /usr/bin/python3 -m venv "$ENV_DIR"
 fi
 
-if ! "$ENV_DIR/bin/python" -c 'import aiohttp, bleak' 2>/dev/null; then
+if ! "$ENV_DIR/bin/python" -c 'import aiohttp, bleak, ai_edge_litert' 2>/dev/null; then
   "$ENV_DIR/bin/python" -m pip install --quiet --disable-pip-version-check -r macos/requirements.txt
 fi
 
