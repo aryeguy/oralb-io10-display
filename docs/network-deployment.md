@@ -16,6 +16,7 @@ git clone https://github.com/aryeguy/oralb-io10-display.git
 cd oralb-io10-display
 python3 -m venv .venv
 .venv/bin/python -m pip install -r macos/requirements.txt
+.venv/bin/python -m pip install -r macos/requirements-comino.txt  # optional
 .venv/bin/python macos/backend.py --lan
 ```
 
@@ -30,6 +31,7 @@ Install Python 3.11 or newer, clone the repository in PowerShell, and run:
 ```powershell
 py -m venv .venv
 .venv\Scripts\python -m pip install -r macos\requirements.txt
+.venv\Scripts\python -m pip install -r macos\requirements-comino.txt  # optional
 .venv\Scripts\python macos\backend.py --lan
 ```
 

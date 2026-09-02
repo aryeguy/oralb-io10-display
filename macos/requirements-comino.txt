@@ -1,0 +1,2 @@
+# Optional: required only when using the private APK Comino model.
+ai-edge-litert>=2.2,<3

@@ -23,6 +23,13 @@ packages, starts the Bluetooth bridge, and opens:
 http://127.0.0.1:8765
 ```
 
+The Comino runtime is optional. On a Mac or Windows machine with the private
+model files, install it with:
+
+```bash
+.venv/bin/python -m pip install -r macos/requirements-comino.txt
+```
+
 When macOS asks, allow Bluetooth access for Terminal or Python. If macOS blocks
 the script because it was downloaded, Control-click it in Finder and choose
 **Open** once.
