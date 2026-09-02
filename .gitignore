@@ -1,0 +1,30 @@
+# ESP-IDF
+firmware/build/
+firmware/sdkconfig
+firmware/dependencies.lock
+firmware/managed_components/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.train-venv/
+.pytest_cache/
+
+# Captures
+*.jsonl
+
+# Per-brush local calibration
+data/*.json
+data/*.tmp
+data/*.npz
+data/comino_models/
+
+# Local archives and generated bundles
+*.zip
+
+# Previous unpacked project copy
+toothbrush/
+
+# macOS
+.DS_Store

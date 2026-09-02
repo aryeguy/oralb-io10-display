@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#07111f">
+  <meta name="description" content="A local real-time dashboard for an Oral-B iO toothbrush.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Oral-B Live">
+  <meta property="og:description" content="Real-time brushing data from your Mac Bluetooth adapter to a local browser display.">
+  <meta property="og:image" content="http://127.0.0.1:8765/og.png">
+  <meta property="og:image:width" content="1730">
+  <meta property="og:image:height" content="909">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Oral-B Live">
+  <meta name="twitter:description" content="Real-time brushing data from your Mac Bluetooth adapter to a local browser display.">
+  <meta name="twitter:image" content="http://127.0.0.1:8765/og.png">
+  <title>Oral-B Live · Mac Bluetooth Display</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <div class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <div>
+          <p class="eyebrow">LOCAL MAC DISPLAY</p>
+          <h1>Oral-B Live</h1>
+        </div>
+      </div>
+      <div class="header-status">
+        <span id="socketDot" class="live-dot"></span>
+        <span id="socketText">Starting bridge…</span>
+      </div>
+    </header>
+
+    <section class="workspace">
+      <div class="preview-column">
+        <div class="device" aria-label="Toothbrush display preview">
+          <div class="screen">
+            <div class="screen-topline">
+              <span id="modeName">DAILY CLEAN</span>
+              <span id="batteryValue">—</span>
+            </div>
+
+            <div id="timer" class="timer">00:00</div>
+            <div class="goal"><span id="goalValue">2:00</span> goal</div>
+
+            <div class="mouth" id="mouth" aria-label="Sixteen mouth surfaces">
+              <div class="arch-guide upper"></div>
+              <div class="arch-guide lower"></div>
+
+              <div class="surface round s0" data-z="0" data-group="1" aria-label="Upper left outside"></div>
+              <div class="surface round s1" data-z="1" data-group="1" aria-label="Upper left chewing"></div>
+              <div class="surface round s2" data-z="2" data-group="1" aria-label="Upper left inside"></div>
+
+              <div class="surface bar s3" data-z="3" data-group="2" aria-label="Upper middle outside"></div>
+              <div class="surface bar s4" data-z="4" data-group="2" aria-label="Upper middle inside"></div>
+
+              <div class="surface round s5" data-z="5" data-group="3" aria-label="Upper right inside"></div>
+              <div class="surface round s6" data-z="6" data-group="3" aria-label="Upper right chewing"></div>
+              <div class="surface round s7" data-z="7" data-group="3" aria-label="Upper right outside"></div>
+
+              <div class="surface round s8" data-z="8" data-group="6" aria-label="Lower left outside"></div>
+              <div class="surface round s9" data-z="9" data-group="6" aria-label="Lower left chewing"></div>
+              <div class="surface round s10" data-z="10" data-group="6" aria-label="Lower left inside"></div>
+
+              <div class="surface bar s11" data-z="11" data-group="5" aria-label="Lower middle outside"></div>
+              <div class="surface bar s12" data-z="12" data-group="5" aria-label="Lower middle inside"></div>
+
+              <div class="surface round s13" data-z="13" data-group="4" aria-label="Lower right inside"></div>
+              <div class="surface round s14" data-z="14" data-group="4" aria-label="Lower right chewing"></div>
+              <div class="surface round s15" data-z="15" data-group="4" aria-label="Lower right outside"></div>
+
+              <div class="center-label outside">Outside</div>
+              <div class="center-label chewing">Chewing</div>
+              <div class="center-label inside">Inside</div>
+              <div id="positionBadge" class="position-badge">WAITING FOR BRUSH</div>
+            </div>
+
+            <div class="screen-status">
+              <div class="pressure-group">
+                <span id="pressureDot" class="pressure-dot"></span>
+                <div>
+                  <div id="pressureText" class="pressure-main">GOOD PRESSURE</div>
+                  <div id="surfaceDetail" class="pressure-detail">No live packet yet</div>
+                </div>
+              </div>
+              <div class="coverage">
+                <strong id="coverageValue">—</strong>
+                <small id="coverageLabel">coverage</small>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="preview-caption"><span></span> The same 368 × 448 view used by the embedded display</p>
+      </div>
+
+      <div class="control-column">
+        <section class="panel connection-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">BLUETOOTH SOURCE</p>
+              <h2 id="connectionTitle">Scanning for your brush</h2>
+            </div>
+            <span id="sourcePill" class="source-pill">PASSIVE</span>
+          </div>
+
+          <div id="connectionMessage" class="connection-message">
+            Wake the toothbrush or lift it from the charger so the Mac can see it.
+          </div>
+
+          <div class="mode-switch" role="group" aria-label="Data source">
+            <button id="liveMode" class="mode-button active" type="button">Live brush</button>
+            <button id="mockMode" class="mode-button" type="button">Demo data</button>
+          </div>
+
+          <div id="liveControls" class="live-controls">
+            <label class="select-label" for="deviceSelect">Discovered toothbrush</label>
+            <div class="connect-row">
+              <select id="deviceSelect" aria-label="Discovered toothbrush">
+                <option value="">Still scanning…</option>
+              </select>
+              <button id="connectButton" class="primary-button" type="button" disabled>Connect direct</button>
+              <button id="disconnectButton" class="secondary-button" type="button" hidden>Release brush</button>
+            </div>
+            <p class="slot-note"><span aria-hidden="true">!</span> Direct mode gives the fastest data but occupies the brush’s single Bluetooth client slot, so the phone app and iO Sense cannot connect at the same time.</p>
+          </div>
+
+          <div id="mockControls" class="mock-controls" hidden>
+            <button id="mockStart" class="primary-button" type="button">Start brushing</button>
+            <button id="mockPause" class="secondary-button" type="button">Pause</button>
+            <button id="mockReset" class="secondary-button" type="button">Reset</button>
+          </div>
+        </section>
+
+        <section class="metrics-grid" aria-label="Live metrics">
+          <article class="metric-card">
+            <span>Pressure</span>
+            <strong id="metricPressure">Normal</strong>
+            <small id="metricForce">FF0B live</small>
+          </article>
+          <article class="metric-card">
+            <span>Pacer</span>
+            <strong id="metricPacer">— / —</strong>
+            <small id="metricPacerTime">Timed sector</small>
+          </article>
+          <article class="metric-card">
+            <span>Signal</span>
+            <strong id="metricSignal">—</strong>
+            <small id="metricAge">No packet</small>
+          </article>
+          <article class="metric-card">
+            <span>Motion stream</span>
+            <strong id="metricMotion">0 Hz</strong>
+            <small id="metricMotionCount">0 packets</small>
+          </article>
+        </section>
+
+        <section class="panel motion-panel">
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow">PHYSICAL POSITION</p>
+              <h2>16-surface calibration</h2>
+            </div>
+            <span id="positionModelPill" class="source-pill neutral">NOT CALIBRATED</span>
+          </div>
+          <div id="calibrationCard" class="calibration-card">
+            <div class="calibration-copy">
+              <strong id="calibrationTarget">Calibration required</strong>
+              <span id="calibrationInstruction">One guided pass aligns the public brush-motion model to your grip.</span>
+            </div>
+            <div class="calibration-progress" aria-hidden="true"><i id="calibrationProgress"></i></div>
+            <div class="calibration-actions">
+              <button id="calibrationStart" class="primary-button" type="button">Calibrate surfaces</button>
+              <button id="calibrationCancel" class="secondary-button" type="button" hidden>Cancel</button>
+            </div>
+          </div>
+          <div class="motion-subheading">
+            <span>Raw FF0D motion</span>
+            <span id="motionFormat" class="source-pill neutral">NO DATA</span>
+          </div>
+          <div class="motion-readout">
+            <code id="motionHex">Connect directly to receive FF0D motion packets.</code>
+          </div>
+          <p class="accuracy-note">FF0D is raw inertial data—not a ready-made zone number. The app uses a public brush-motion prior plus your local grip calibration; the six timed pacer intervals remain separate.</p>
+        </section>
+
+        <section class="panel packet-panel">
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow">LIVE CAPTURE</p>
+              <h2>Recent packets</h2>
+            </div>
+            <a id="downloadCapture" class="text-link" href="/api/capture" download>Download JSONL</a>
+          </div>
+          <div id="packetList" class="packet-list" aria-live="polite">
+            <div class="empty-packets">Packets will appear here in real time.</div>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>

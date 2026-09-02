@@ -1,0 +1,3 @@
+aiohttp>=3.10,<4
+bleak>=1.1,<2
+ai-edge-litert>=1.2,<2
