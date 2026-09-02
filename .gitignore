@@ -18,6 +18,7 @@ __pycache__/
 data/*.json
 data/*.tmp
 data/*.npz
+data/*.gz
 data/comino_models/
 
 # Local archives and generated bundles
