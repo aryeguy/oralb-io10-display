@@ -80,6 +80,9 @@ bool MacStateClient::update(uint32_t nowMs, BrushSnapshot& snapshot) {
     config.url = app_config::kMacServerUrl;
     config.method = HTTP_METHOD_GET;
     config.timeout_ms = 350;
+    config.buffer_size = 4096;
+    config.buffer_size_tx = 512;
+    config.keep_alive_enable = false;
     config.event_handler = http_event;
     config.user_data = &body;
     esp_http_client_handle_t client = esp_http_client_init(&config);

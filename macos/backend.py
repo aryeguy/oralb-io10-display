@@ -636,6 +636,25 @@ def create_app(bridge: OralBBridge, open_browser: bool = False, port: int = 8765
     async def state(request: web.Request) -> web.Response:
         return web.json_response(request.app["bridge"].public_state())
 
+    async def display_state(request: web.Request) -> web.Response:
+        """Small state contract for constrained LAN display clients."""
+        public = request.app["bridge"].public_state()
+        brush = public["brush"]
+        compact_brush = {
+            key: brush.get(key)
+            for key in (
+                "valid", "brushing", "elapsed_seconds", "pressure", "mode_raw",
+                "pacer_sector", "pacer_sector_count", "pacer_sector_timer",
+            )
+        }
+        position = brush.get("position", {})
+        compact_brush["position"] = {
+            "active_surface": position.get("active_surface"),
+            "confidence": position.get("confidence", 0.0),
+            "coverage": position.get("coverage", [0.0] * 16),
+        }
+        return web.json_response({"type": "display_state", "brush": compact_brush})
+
     async def connect(request: web.Request) -> web.Response:
         active: OralBBridge = request.app["bridge"]
         body = await request.json()
@@ -729,6 +748,7 @@ def create_app(bridge: OralBBridge, open_browser: bool = False, port: int = 8765
 
     app.router.add_get("/", index)
     app.router.add_get("/api/state", state)
+    app.router.add_get("/api/display-state", display_state)
     app.router.add_post("/api/connect", connect)
     app.router.add_post("/api/disconnect", disconnect)
     app.router.add_post("/api/mode", mode)
