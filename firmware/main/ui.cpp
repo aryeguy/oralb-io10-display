@@ -163,7 +163,7 @@ void BrushUi::buildMouth() {
     lv_label_set_text(outside, "Outside");
 
     lv_obj_t* chewing = lv_label_create(screen_);
-    lv_obj_set_width(120);
+    lv_obj_set_width(chewing, 120);
     lv_obj_set_pos(chewing, 124, 235);
     lv_obj_set_style_text_align(chewing, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(chewing, &lv_font_montserrat_12, 0);
@@ -171,7 +171,7 @@ void BrushUi::buildMouth() {
     lv_label_set_text(chewing, "Chewing");
 
     lv_obj_t* inside = lv_label_create(screen_);
-    lv_obj_set_width(120);
+    lv_obj_set_width(inside, 120);
     lv_obj_set_pos(inside, 124, 258);
     lv_obj_set_style_text_align(inside, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(inside, &lv_font_montserrat_12, 0);
