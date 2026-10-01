@@ -92,8 +92,9 @@ def initial_brush() -> dict[str, Any]:
 
 
 class OralBBridge:
-    def __init__(self, start_mode: str = "live") -> None:
+    def __init__(self, start_mode: str = "live", no_ble: bool = False) -> None:
         self.mode = start_mode
+        self.no_ble = no_ble
         self.connection: dict[str, Any] = {
             "status": "starting",
             "device_id": None,
@@ -128,6 +129,15 @@ class OralBBridge:
         self._ticker_task = asyncio.create_task(self._ticker())
         if self.mode == "mock":
             await self.set_mode("mock")
+        elif self.no_ble:
+            self.connection.update({
+                "status": "esp32_proxy",
+                "device_id": "esp32",
+                "device_name": "ESP32 BLE relay",
+                "error": None,
+                "direct_requested": False,
+            })
+            await self.publish()
         else:
             await self.start_scanner()
 
@@ -445,6 +455,17 @@ class OralBBridge:
     async def set_mode(self, mode: str) -> None:
         if mode not in {"live", "mock"}:
             raise ValueError("mode must be live or mock")
+        if mode == "live" and self.no_ble:
+            self.mode = "live"
+            self.connection.update({
+                "status": "esp32_proxy",
+                "device_id": "esp32",
+                "device_name": "ESP32 BLE relay",
+                "error": None,
+                "direct_requested": False,
+            })
+            await self.publish()
+            return
         if mode == self.mode and ((mode == "mock" and self._mock_task) or (mode == "live" and self._scanner)):
             return
         self.mode = mode
@@ -655,6 +676,30 @@ def create_app(bridge: OralBBridge, open_browser: bool = False, port: int = 8765
         }
         return web.json_response({"type": "display_state", "brush": compact_brush})
 
+    async def ingest(request: web.Request) -> web.Response:
+        """Accept brush telemetry relayed by the ESP32 Bluetooth client."""
+        active: OralBBridge = request.app["bridge"]
+        payload = await request.json()
+        values = {
+            key: payload[key]
+            for key in (
+                "valid", "brushing", "elapsed_seconds", "mode_raw",
+                "pacer_sector", "pacer_sector_count", "pacer_sector_timer", "pressure",
+            )
+            if key in payload
+        }
+        values["source"] = "esp32_ble"
+        active._apply_update(values, source="esp32_ble", name="ESP32 BLE relay", device_id="esp32")
+        active.connection.update({
+            "status": "esp32_proxy",
+            "device_id": "esp32",
+            "device_name": "ESP32 BLE relay",
+            "error": None,
+            "direct_requested": False,
+        })
+        await active.publish()
+        return web.json_response({"ok": True, "state": active.public_state()})
+
     async def connect(request: web.Request) -> web.Response:
         active: OralBBridge = request.app["bridge"]
         body = await request.json()
@@ -749,6 +794,7 @@ def create_app(bridge: OralBBridge, open_browser: bool = False, port: int = 8765
     app.router.add_get("/", index)
     app.router.add_get("/api/state", state)
     app.router.add_get("/api/display-state", display_state)
+    app.router.add_post("/api/ingest", ingest)
     app.router.add_post("/api/connect", connect)
     app.router.add_post("/api/disconnect", disconnect)
     app.router.add_post("/api/mode", mode)
@@ -778,11 +824,16 @@ def main() -> None:
     )
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--mock", action="store_true", help="start with the virtual brush")
+    parser.add_argument(
+        "--no-ble",
+        action="store_true",
+        help="do not access Bluetooth; accept telemetry relayed by an ESP32",
+    )
     parser.add_argument("--open", action="store_true", help="open the browser after startup")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
-    bridge = OralBBridge("mock" if args.mock else "live")
+    bridge = OralBBridge("mock" if args.mock else "live", no_ble=args.no_ble)
     app = create_app(bridge, open_browser=args.open, port=args.port)
     bind_host = "0.0.0.0" if args.lan else args.host
     web.run_app(app, host=bind_host, port=args.port, print=lambda line: print(f"Oral-B Live: {line}"))

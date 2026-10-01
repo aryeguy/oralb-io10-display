@@ -147,3 +147,40 @@ bool MacStateClient::reset(uint32_t nowMs) {
     esp_http_client_cleanup(client);
     return err == ESP_OK && status == 200;
 }
+
+bool MacStateClient::publish(const BrushSnapshot& snapshot) {
+    wifi_ap_record_t ap{};
+    if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK) return false;
+
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "valid", snapshot.valid);
+    cJSON_AddBoolToObject(root, "brushing", snapshot.brushing);
+    cJSON_AddNumberToObject(root, "elapsed_seconds", snapshot.elapsedSeconds);
+    cJSON_AddNumberToObject(root, "mode_raw", snapshot.modeRaw);
+    cJSON_AddNumberToObject(root, "pacer_sector", snapshot.pacerSector);
+    cJSON_AddNumberToObject(root, "pacer_sector_count", snapshot.pacerSectorCount);
+    cJSON_AddNumberToObject(root, "pacer_sector_timer", snapshot.pacerSectorTimer);
+    cJSON_AddStringToObject(root, "pressure", pressure_name(snapshot.pressure));
+    char* encoded = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!encoded) return false;
+
+    esp_http_client_config_t config{};
+    config.url = app_config::kMacIngestUrl;
+    config.method = HTTP_METHOD_POST;
+    config.timeout_ms = 500;
+    config.buffer_size = 1024;
+    config.keep_alive_enable = false;
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client) {
+        cJSON_free(encoded);
+        return false;
+    }
+    esp_http_client_set_header(client, "Content-Type", "application/json");
+    esp_http_client_set_post_field(client, encoded, std::strlen(encoded));
+    esp_err_t err = esp_http_client_perform(client);
+    const int status = esp_http_client_get_status_code(client);
+    esp_http_client_cleanup(client);
+    cJSON_free(encoded);
+    return err == ESP_OK && status == 200;
+}

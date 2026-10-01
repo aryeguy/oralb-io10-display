@@ -43,6 +43,12 @@ extern "C" void app_main(void) {
     if (app_config::kUseMacServer) {
         ESP_LOGI(TAG, "Using Mac server state source");
         macClient.begin();
+        // Bluetooth remains local to the ESP32. The Pi only receives the
+        // decoded advertisement state over Wi-Fi.
+        bleSource = std::make_unique<BleBrushSource>(queue);
+        if (!bleSource->begin(app_config::kScanWindowMs)) {
+            ESP_LOGE(TAG, "ESP32 BLE source failed to start");
+        }
     } else if (app_config::kUseMockBrush) {
         ESP_LOGI(TAG, "Using mock toothbrush source");
         mockSource.begin(nowMs);
@@ -60,6 +66,11 @@ extern "C" void app_main(void) {
         nowMs = static_cast<uint32_t>(esp_timer_get_time() / 1000ULL);
 
         if (app_config::kUseMacServer) {
+            BrushSnapshot localSnapshot;
+            if (xQueueReceive(queue, &localSnapshot, 0) == pdTRUE) {
+                model.apply(localSnapshot);
+                macClient.publish(localSnapshot);
+            }
             BrushSnapshot snapshot;
             if (macClient.update(nowMs, snapshot)) model.apply(snapshot);
         } else if (app_config::kUseMockBrush) {

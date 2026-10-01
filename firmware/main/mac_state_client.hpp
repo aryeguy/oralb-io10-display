@@ -9,6 +9,7 @@ public:
     bool begin();
     bool update(uint32_t nowMs, BrushSnapshot& snapshot);
     bool reset(uint32_t nowMs);
+    bool publish(const BrushSnapshot& snapshot);
 
 private:
     bool connected_ = false;

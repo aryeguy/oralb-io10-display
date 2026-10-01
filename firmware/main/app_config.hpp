@@ -12,6 +12,7 @@ constexpr bool kUseMockBrush = false;
 constexpr bool kUseMacServer = true;
 constexpr const char* kMacServerUrl = "http://192.168.0.139:8765/api/display-state";
 constexpr const char* kMacResetUrl = "http://192.168.0.139:8765/api/reset";
+constexpr const char* kMacIngestUrl = "http://192.168.0.139:8765/api/ingest";
 
 // Passive advertisements expose the timed pacer sector, but not a fully
 // decoded physical 3-surface mouth position. Keep this false for real BLE.
