@@ -10,7 +10,8 @@ constexpr bool kUseMockBrush = false;
 // The Mac performs direct BLE/GATT and the official Comino classification;
 // the ESP32 receives the resulting state over the local network.
 constexpr bool kUseMacServer = true;
-constexpr const char* kMacServerUrl = "http://192.168.0.134:8765/api/state";
+constexpr const char* kMacServerUrl = "http://192.168.0.139:8765/api/state";
+constexpr const char* kMacResetUrl = "http://192.168.0.139:8765/api/reset";
 
 // Passive advertisements expose the timed pacer sector, but not a fully
 // decoded physical 3-surface mouth position. Keep this false for real BLE.

@@ -261,6 +261,14 @@ class PositionEngine:
         self.calibration_examples = defaultdict(list)
         self._reset_stream()
 
+    def reset_session(self) -> None:
+        """Clear tracked coverage without changing the calibrated model."""
+        self.coverage = [0.0] * 16
+        self.active_surface = None
+        self.confidence = 0.0
+        self.nearest_distance = None
+        self._reset_stream(keep_timestamp=True)
+
     def set_brushing(self, brushing: bool) -> None:
         if brushing and not self._was_brushing:
             if not self.calibration_active:

@@ -128,3 +128,19 @@ bool MacStateClient::update(uint32_t nowMs, BrushSnapshot& snapshot) {
     cJSON_Delete(root);
     return true;
 }
+
+bool MacStateClient::reset(uint32_t nowMs) {
+    (void)nowMs;
+    wifi_ap_record_t ap{};
+    if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK) return false;
+    esp_http_client_config_t config{};
+    config.url = app_config::kMacResetUrl;
+    config.method = HTTP_METHOD_POST;
+    config.timeout_ms = 500;
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client) return false;
+    esp_err_t err = esp_http_client_perform(client);
+    const int status = esp_http_client_get_status_code(client);
+    esp_http_client_cleanup(client);
+    return err == ESP_OK && status == 200;
+}

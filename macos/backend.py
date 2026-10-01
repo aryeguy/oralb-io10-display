@@ -597,6 +597,11 @@ class OralBBridge:
         self.brush["position"] = self.position_engine.position_state()
         await self.publish()
 
+    async def reset_session(self) -> None:
+        self.position_engine.reset_session()
+        self.brush["position"] = self.position_engine.position_state()
+        await self.publish()
+
     def schedule_publish(self, delay: float = 0.1) -> None:
         if not self._loop or self._publish_handle:
             return
@@ -678,6 +683,11 @@ def create_app(bridge: OralBBridge, open_browser: bool = False, port: int = 8765
         await active.cancel_calibration()
         return web.json_response({"ok": True, "state": active.public_state()})
 
+    async def reset_session(request: web.Request) -> web.Response:
+        active: OralBBridge = request.app["bridge"]
+        await active.reset_session()
+        return web.json_response({"ok": True, "state": active.public_state()})
+
     async def capture(request: web.Request) -> web.Response:
         active: OralBBridge = request.app["bridge"]
         body = "".join(json.dumps(row) + "\n" for row in active._events)
@@ -717,6 +727,7 @@ def create_app(bridge: OralBBridge, open_browser: bool = False, port: int = 8765
     app.router.add_post("/api/mock", mock)
     app.router.add_post("/api/calibration/start", start_calibration)
     app.router.add_post("/api/calibration/cancel", cancel_calibration)
+    app.router.add_post("/api/reset", reset_session)
     app.router.add_get("/api/capture", capture)
     app.router.add_get("/ws", websocket)
     app.router.add_static("/", STATIC_DIR, show_index=False)

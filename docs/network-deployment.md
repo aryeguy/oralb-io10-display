@@ -48,10 +48,32 @@ so no client-side IP address or configuration is needed. Use `--host
 `--host 192.168.1.50` to bind to one specific interface. The default port is
 `8765`; change it with `--port`.
 
-The ESP32 display is a future client of this same state contract. The current
-firmware remains a standalone BLE display and does not yet fetch the WebSocket
-stream; implementing a small HTTP/WebSocket client will let it display the
-server's classified zones without putting the proprietary model on the board.
+The ESP32 display is an HTTP client of this same state contract. Configure its
+server address in `firmware/main/app_config.hpp`; the firmware polls
+`/api/state` and uses `/api/reset` for the touchscreen reset action. The
+proprietary model stays on the server and is never placed on the board.
+
+For a headless Pi, run the backend as a systemd service after installing the
+dependencies:
+
+```ini
+[Unit]
+Description=Oral-B iO Live bridge
+After=bluetooth.target network-online.target
+Wants=bluetooth.target network-online.target
+
+[Service]
+WorkingDirectory=/home/pi/oralb-io10-display
+ExecStart=/home/pi/oralb-io10-display/.venv/bin/python macos/backend.py --lan
+Restart=always
+User=pi
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Save it as `/etc/systemd/system/oralb-io10.service`, then run
+`sudo systemctl daemon-reload && sudo systemctl enable --now oralb-io10`.
 
 ## Model assets
 

@@ -74,6 +74,12 @@ extern "C" void app_main(void) {
             }
         }
 
+        if (ui.consumeResetRequest()) {
+            if (app_config::kUseMacServer) macClient.reset(nowMs);
+            model.reset();
+            ui.resetVisualState();
+        }
+
         model.tick(nowMs, app_config::kDemoCoverageFromTimer);
         ui.render(model.state());
 

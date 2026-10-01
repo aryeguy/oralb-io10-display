@@ -8,6 +8,7 @@ class MacStateClient {
 public:
     bool begin();
     bool update(uint32_t nowMs, BrushSnapshot& snapshot);
+    bool reset(uint32_t nowMs);
 
 private:
     bool connected_ = false;
