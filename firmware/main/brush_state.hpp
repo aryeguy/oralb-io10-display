@@ -51,6 +51,7 @@ struct BrushState {
     // unless explicitly enabled in app_config.
     std::array<uint8_t, kMouthSurfaceCount> coverage{};
     int8_t activeSurface = -1;
+    uint8_t positionConfidence = 0;
 
     // FF0D carries inertial samples, not a ready-made mouth position.
     // A direct-GATT source can retain one raw payload here for research.

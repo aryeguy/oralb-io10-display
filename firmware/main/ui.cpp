@@ -2,6 +2,7 @@
 
 #include "app_config.hpp"
 #include "bsp/esp-bsp.h"
+#include "esp_log.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -10,6 +11,8 @@ static lv_color_t color_from_hex(uint32_t hex) {
     return lv_color_hex(hex);
 }
 
+static const char* TAG = "oralb_ui";
+
 bool BrushUi::begin() {
     lv_display_t* display = bsp_display_start();
     if (display == nullptr) {
@@ -17,10 +20,13 @@ bool BrushUi::begin() {
     }
 
     bsp_display_brightness_set(app_config::kDisplayBrightnessPercent);
+    // The BSP enables the panel/backlight as part of bsp_display_start().
 
-    if (!bsp_display_lock(0)) {
+    if (!bsp_display_lock(1000)) {
+        ESP_LOGE(TAG, "Timed out waiting for LVGL display lock");
         return false;
     }
+    ESP_LOGI(TAG, "Building display UI");
 
     screen_ = lv_screen_active();
     lv_obj_set_style_bg_color(screen_, color_from_hex(0xEEF4FB), 0);
@@ -76,7 +82,7 @@ bool BrushUi::begin() {
     lv_obj_set_pos(detailLabel_, 43, 402);
     lv_obj_set_style_text_font(detailLabel_, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(detailLabel_, color_from_hex(0x95A8BC), 0);
-    lv_label_set_text(detailLabel_, "Looking for toothbrush");
+    lv_label_set_text(detailLabel_, "Waiting for Mac server");
 
     coverageLabel_ = lv_label_create(screen_);
     lv_obj_set_width(coverageLabel_, 75);
@@ -94,6 +100,7 @@ bool BrushUi::begin() {
     lv_label_set_text(coverageCaption, "coverage");
 
     bsp_display_unlock();
+    ESP_LOGI(TAG, "Display UI ready");
     return true;
 }
 

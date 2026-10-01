@@ -3,6 +3,7 @@
 #include "brush_model.hpp"
 #include "mock_source.hpp"
 #include "ui.hpp"
+#include "mac_state_client.hpp"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -33,12 +34,16 @@ extern "C" void app_main(void) {
     ui.render(model.state());
 
     std::unique_ptr<BleBrushSource> bleSource;
+    MacStateClient macClient;
     MockBrushSource mockSource;
 
     uint32_t nowMs =
         static_cast<uint32_t>(esp_timer_get_time() / 1000ULL);
 
-    if (app_config::kUseMockBrush) {
+    if (app_config::kUseMacServer) {
+        ESP_LOGI(TAG, "Using Mac server state source");
+        macClient.begin();
+    } else if (app_config::kUseMockBrush) {
         ESP_LOGI(TAG, "Using mock toothbrush source");
         mockSource.begin(nowMs);
     } else {
@@ -54,7 +59,10 @@ extern "C" void app_main(void) {
     while (true) {
         nowMs = static_cast<uint32_t>(esp_timer_get_time() / 1000ULL);
 
-        if (app_config::kUseMockBrush) {
+        if (app_config::kUseMacServer) {
+            BrushSnapshot snapshot;
+            if (macClient.update(nowMs, snapshot)) model.apply(snapshot);
+        } else if (app_config::kUseMockBrush) {
             BrushSnapshot snapshot;
             if (mockSource.update(nowMs, snapshot)) {
                 model.apply(snapshot);

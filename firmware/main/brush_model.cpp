@@ -44,6 +44,9 @@ void BrushModel::apply(const BrushSnapshot& s) {
     state_.pacerSectorCount = s.pacerSectorCount;
     state_.pacerSectorTimer = s.pacerSectorTimer;
     state_.lastPacketMs = s.receivedAtMs;
+    state_.coverage = s.coverage;
+    state_.activeSurface = s.activeSurface;
+    state_.positionConfidence = s.positionConfidence;
 
     if (s.batteryPercent >= 0) {
         state_.batteryPercent = s.batteryPercent;

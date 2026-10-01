@@ -2,6 +2,7 @@
 
 #include "brush_state.hpp"
 #include <cstdint>
+#include <array>
 
 struct BrushSnapshot {
     bool valid = false;
@@ -14,4 +15,7 @@ struct BrushSnapshot {
     uint8_t pacerSectorTimer = 0;
     int batteryPercent = -1;
     uint32_t receivedAtMs = 0;
+    std::array<uint8_t, kMouthSurfaceCount> coverage{};
+    int8_t activeSurface = -1;
+    uint8_t positionConfidence = 0;
 };
