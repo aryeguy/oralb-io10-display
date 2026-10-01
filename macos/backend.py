@@ -19,7 +19,7 @@ import webbrowser
 from aiohttp import WSMsgType, web
 from bleak import BleakClient, BleakScanner
 
-from oralb_protocol import ORALB_COMPANY_ID, parse_advertisement, parse_gatt_value
+from oralb_protocol import ORALB_COMPANY_ID, parse_advertisement, parse_gatt_value, parse_motion
 from position_classifier import PositionEngine
 
 
@@ -688,8 +688,28 @@ def create_app(bridge: OralBBridge, open_browser: bool = False, port: int = 8765
             )
             if key in payload
         }
+        motion_hex = payload.get("motion_payload_hex")
+        motion_decoded = None
+        if isinstance(motion_hex, str) and motion_hex:
+            try:
+                motion_decoded = parse_motion(bytes.fromhex(motion_hex))
+                values.update(motion_decoded)
+            except ValueError:
+                logging.debug("Invalid ESP32 motion payload: %r", motion_hex)
         values["source"] = "esp32_ble"
         active._apply_update(values, source="esp32_ble", name="ESP32 BLE relay", device_id="esp32")
+        if motion_decoded is not None:
+            now = time.monotonic()
+            active._motion_times.append(now)
+            while active._motion_times and now - active._motion_times[0] > 2:
+                active._motion_times.popleft()
+            active.brush["motion_packet_count"] += 1
+            active.brush["motion_rate_hz"] = round(len(active._motion_times) / 2, 1)
+            active.position_engine.ingest(
+                motion_decoded.get("motion_samples", []),
+                bool(active.brush.get("brushing")),
+            )
+            active.brush["position"] = active.position_engine.position_state()
         active.connection.update({
             "status": "esp32_proxy",
             "device_id": "esp32",

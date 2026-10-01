@@ -161,6 +161,15 @@ bool MacStateClient::publish(const BrushSnapshot& snapshot) {
     cJSON_AddNumberToObject(root, "pacer_sector_count", snapshot.pacerSectorCount);
     cJSON_AddNumberToObject(root, "pacer_sector_timer", snapshot.pacerSectorTimer);
     cJSON_AddStringToObject(root, "pressure", pressure_name(snapshot.pressure));
+    if (snapshot.motionPayloadSize > 0) {
+        static const char* hex = "0123456789abcdef";
+        char encodedMotion[129]{};
+        for (size_t i = 0; i < snapshot.motionPayloadSize; ++i) {
+            encodedMotion[i * 2] = hex[(snapshot.motionPayload[i] >> 4) & 0x0f];
+            encodedMotion[i * 2 + 1] = hex[snapshot.motionPayload[i] & 0x0f];
+        }
+        cJSON_AddStringToObject(root, "motion_payload_hex", encodedMotion);
+    }
     char* encoded = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (!encoded) return false;

@@ -4,9 +4,11 @@
 #include "esp_timer.h"
 
 #include <algorithm>
+#include <cstring>
 #include <string>
 
 static const char* TAG = "oralb_ble";
+static constexpr const char* kMotionUuid = "a0f0ff0d-5047-4d53-8208-4f72616c2d42";
 
 BleBrushSource::BleBrushSource(QueueHandle_t outputQueue)
     : queue_(outputQueue),
@@ -85,6 +87,13 @@ void BleBrushSource::handleManufacturerData(const NimBLEAdvertisedDevice* device
         }
 
         xQueueOverwrite(queue_, &snapshot);
+        latestSnapshot_ = snapshot;
+
+        // The manufacturer packet is also the discovery trigger for the
+        // direct GATT session. FF0D is not present in advertisements.
+        if (!client_ && !connecting_) {
+            connectToBrush(device);
+        }
 
         ESP_LOGD(
             TAG,
@@ -97,6 +106,68 @@ void BleBrushSource::handleManufacturerData(const NimBLEAdvertisedDevice* device
             snapshot.modeRaw
         );
     }
+}
+
+void BleBrushSource::connectToBrush(const NimBLEAdvertisedDevice* device) {
+    if (device == nullptr || connecting_ || client_ != nullptr) return;
+    connecting_ = true;
+    brushAddress_ = device->getAddress();
+    ESP_LOGI(TAG, "Connecting to Oral-B GATT device %s", brushAddress_.toString().c_str());
+
+    NimBLEDevice::getScan()->stop();
+    client_ = NimBLEDevice::createClient();
+    if (client_ == nullptr || !client_->connect(device)) {
+        ESP_LOGW(TAG, "Oral-B GATT connection failed");
+        if (client_) {
+            NimBLEDevice::deleteClient(client_);
+            client_ = nullptr;
+        }
+        connecting_ = false;
+        NimBLEDevice::getScan()->start(scanWindowMs_, false, true);
+        return;
+    }
+
+    NimBLERemoteService* service = client_->getService("a0f0ff00-5047-4d53-8208-4f72616c2d42");
+    motionCharacteristic_ = service ? service->getCharacteristic(kMotionUuid) : nullptr;
+    if (motionCharacteristic_ == nullptr || !motionCharacteristic_->canNotify()) {
+        ESP_LOGW(TAG, "Oral-B GATT connected but FF0D notifications unavailable");
+        client_->disconnect();
+        NimBLEDevice::deleteClient(client_);
+        client_ = nullptr;
+        connecting_ = false;
+        NimBLEDevice::getScan()->start(scanWindowMs_, false, true);
+        return;
+    }
+
+    const bool subscribed = motionCharacteristic_->subscribe(
+        true,
+        [this](NimBLERemoteCharacteristic*, uint8_t* data, size_t length, bool) {
+            handleMotion(data, length);
+        });
+    if (!subscribed) {
+        ESP_LOGW(TAG, "FF0D notification subscription failed");
+        client_->disconnect();
+        NimBLEDevice::deleteClient(client_);
+        client_ = nullptr;
+        connecting_ = false;
+        NimBLEDevice::getScan()->start(scanWindowMs_, false, true);
+        return;
+    }
+
+    connecting_ = false;
+    ESP_LOGI(TAG, "Subscribed to Oral-B FF0D motion notifications");
+}
+
+void BleBrushSource::handleMotion(const uint8_t* data, size_t length) {
+    if (data == nullptr || length == 0) return;
+    BrushSnapshot snapshot = latestSnapshot_;
+    snapshot.valid = true;
+    snapshot.motionPayloadSize = static_cast<uint8_t>(std::min(length, snapshot.motionPayload.size()));
+    std::memcpy(snapshot.motionPayload.data(), data, snapshot.motionPayloadSize);
+    snapshot.motionPacketCount = 1;
+    snapshot.receivedAtMs = static_cast<uint32_t>(esp_timer_get_time() / 1000ULL);
+    xQueueOverwrite(queue_, &snapshot);
+    ESP_LOGI(TAG, "FF0D motion notification length=%u", static_cast<unsigned>(length));
 }
 
 void BleBrushSource::onResult(const NimBLEAdvertisedDevice* device) {

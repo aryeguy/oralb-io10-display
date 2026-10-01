@@ -4,6 +4,7 @@
 #include "oralb_adv_parser.hpp"
 
 #include "NimBLEDevice.h"
+#include "NimBLEClient.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
@@ -17,10 +18,17 @@ private:
     QueueHandle_t queue_;
     uint32_t scanWindowMs_;
     OralBAdvParser parser_;
+    BrushSnapshot latestSnapshot_;
+    NimBLEClient* client_ = nullptr;
+    NimBLERemoteCharacteristic* motionCharacteristic_ = nullptr;
+    bool connecting_ = false;
+    NimBLEAddress brushAddress_;
 
     void onResult(const NimBLEAdvertisedDevice* device) override;
     void onScanEnd(const NimBLEScanResults& results, int reason) override;
 
     bool isOralB(const NimBLEAdvertisedDevice* device) const;
     void handleManufacturerData(const NimBLEAdvertisedDevice* device);
+    void connectToBrush(const NimBLEAdvertisedDevice* device);
+    void handleMotion(const uint8_t* data, size_t length);
 };
