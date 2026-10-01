@@ -711,12 +711,20 @@ def create_app(bridge: OralBBridge, open_browser: bool = False, port: int = 8765
             active._websockets.discard(ws)
         return ws
 
-    async def on_startup(_app: web.Application) -> None:
-        await bridge.start()
+    async def on_startup(app: web.Application) -> None:
+        # Do not hold the HTTP listener hostage to BlueZ discovery.  On some
+        # Pi/BlueZ combinations scanner.start() can take several seconds (or
+        # wait for D-Bus); the state API must still be available to the ESP32.
+        app["bridge_start_task"] = asyncio.create_task(bridge.start())
         if open_browser:
             asyncio.get_running_loop().call_later(0.7, webbrowser.open, f"http://127.0.0.1:{port}")
 
-    async def on_cleanup(_app: web.Application) -> None:
+    async def on_cleanup(app: web.Application) -> None:
+        task = app.get("bridge_start_task")
+        if task and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
         await bridge.stop()
 
     app.router.add_get("/", index)
