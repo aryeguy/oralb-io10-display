@@ -8,6 +8,10 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
+# Keep enough internal DMA-capable RAM available when Wi-Fi and NimBLE are
+# active together. The display is updated in smaller stripes over SPI.
+CONFIG_BSP_DISPLAY_LVGL_BUF_HEIGHT=40
+
 # Bluetooth + NimBLE observer
 CONFIG_BT_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=y
