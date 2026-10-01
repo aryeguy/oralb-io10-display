@@ -179,6 +179,31 @@ class OralBBridge:
                     rssi=advertisement.rssi,
                 )
 
+        # The ESP32 display needs the direct GATT characteristics (especially
+        # FF0B pressure and FF0D motion).  Automatically promote the first
+        # discovered Oral-B device from passive scanning to a GATT session;
+        # the browser can still explicitly choose a device through /api/connect.
+        is_brush_candidate = decoded is not None or is_oralb_name
+        if (
+            is_brush_candidate
+            and
+            not self._direct_requested
+            and self._client is None
+            and self.connection["status"] == "scanning"
+        ):
+            self._direct_requested = True
+            self._target_device_id = device.address
+            self.connection.update(
+                {
+                    "status": "connecting",
+                    "device_id": device.address,
+                    "device_name": name or "Oral-B Toothbrush",
+                    "error": None,
+                    "direct_requested": True,
+                }
+            )
+            self._spawn(self.connect(device.address))
+
         if self._direct_requested and self._target_device_id == device.address:
             if self.connection["status"] in {"scanning", "reconnecting", "error"}:
                 self.connection["status"] = "connecting"
@@ -248,6 +273,12 @@ class OralBBridge:
             try:
                 client = BleakClient(device, disconnected_callback=self._on_disconnected, timeout=12)
                 await client.connect()
+                # Some nearby Oral-B accessories (for example iO Sense) are
+                # connectable but do not expose the brush GATT service.  Do
+                # not report those as connected: the pressure and motion
+                # characteristics would be unavailable.
+                if client.services.get_characteristic(UUIDS["pressure"]) is None:
+                    raise RuntimeError("Connected device is not an Oral-B brush")
                 self._client = client
                 self.connection["status"] = "connected"
                 await self._subscribe(client)
@@ -264,7 +295,17 @@ class OralBBridge:
                 return True
             except Exception as exc:
                 self._client = None
-                self.connection.update({"status": "reconnecting", "error": self._friendly_ble_error(exc)})
+                incompatible = str(exc) == "Connected device is not an Oral-B brush"
+                if incompatible:
+                    self._direct_requested = False
+                    self._target_device_id = None
+                self.connection.update(
+                    {
+                        "status": "reconnecting",
+                        "error": self._friendly_ble_error(exc),
+                        "direct_requested": self._direct_requested,
+                    }
+                )
                 await self.start_scanner()
                 return False
 
