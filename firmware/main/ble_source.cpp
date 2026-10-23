@@ -8,7 +8,20 @@
 #include <string>
 
 static const char* TAG = "oralb_ble";
+static constexpr const char* kServiceUuid = "a0f0ff00-5047-4d53-8208-4f72616c2d42";
 static constexpr const char* kMotionUuid = "a0f0ff0d-5047-4d53-8208-4f72616c2d42";
+
+class BrushClientCallbacks final : public NimBLEClientCallbacks {
+public:
+    explicit BrushClientCallbacks(BleBrushSource* owner) : owner_(owner) {}
+
+    void onDisconnect(NimBLEClient* client, int reason) override {
+        if (owner_) owner_->handleClientDisconnect(client, reason);
+    }
+
+private:
+    BleBrushSource* owner_;
+};
 
 BleBrushSource::BleBrushSource(QueueHandle_t outputQueue)
     : queue_(outputQueue),
@@ -116,8 +129,17 @@ void BleBrushSource::connectToBrush(const NimBLEAdvertisedDevice* device) {
 
     NimBLEDevice::getScan()->stop();
     client_ = NimBLEDevice::createClient();
-    if (client_ == nullptr || !client_->connect(device)) {
-        ESP_LOGW(TAG, "Oral-B GATT connection failed");
+    if (client_ == nullptr) {
+        ESP_LOGW(TAG, "Unable to allocate Oral-B GATT client");
+        connecting_ = false;
+        NimBLEDevice::getScan()->start(scanWindowMs_, false, true);
+        return;
+    }
+    client_->setClientCallbacks(new BrushClientCallbacks(this), true);
+    client_->setConnectTimeout(10000);
+    client_->setConnectRetries(3);
+    if (!client_->connect(device)) {
+        ESP_LOGW(TAG, "Oral-B GATT connection failed, last_error=%d", client_->getLastError());
         if (client_) {
             NimBLEDevice::deleteClient(client_);
             client_ = nullptr;
@@ -127,10 +149,13 @@ void BleBrushSource::connectToBrush(const NimBLEAdvertisedDevice* device) {
         return;
     }
 
-    NimBLERemoteService* service = client_->getService("a0f0ff00-5047-4d53-8208-4f72616c2d42");
+    ESP_LOGI(TAG, "Oral-B GATT connected, RSSI=%d; discovering services", client_->getRssi());
+    const auto& services = client_->getServices();
+    ESP_LOGI(TAG, "Oral-B GATT exposed %u services", static_cast<unsigned>(services.size()));
+    NimBLERemoteService* service = client_->getService(kServiceUuid);
     motionCharacteristic_ = service ? service->getCharacteristic(kMotionUuid) : nullptr;
     if (motionCharacteristic_ == nullptr || !motionCharacteristic_->canNotify()) {
-        ESP_LOGW(TAG, "Oral-B GATT connected but FF0D notifications unavailable");
+        ESP_LOGW(TAG, "Oral-B GATT connected but FF0D notifications unavailable (service=%s)", service ? "yes" : "no");
         client_->disconnect();
         NimBLEDevice::deleteClient(client_);
         client_ = nullptr;
@@ -178,6 +203,22 @@ void BleBrushSource::onResult(const NimBLEAdvertisedDevice* device) {
 }
 
 void BleBrushSource::onScanEnd(const NimBLEScanResults&, int reason) {
+    // stop() is part of the connection hand-off. Do not restart scanning
+    // underneath the GATT discovery/subscription sequence.
+    if (connecting_ || client_ != nullptr) {
+        ESP_LOGI(TAG, "Scan ended (%d) for GATT hand-off", reason);
+        return;
+    }
     ESP_LOGI(TAG, "Scan ended (%d), restarting", reason);
+    NimBLEDevice::getScan()->start(scanWindowMs_, false, true);
+}
+
+void BleBrushSource::handleClientDisconnect(NimBLEClient* client, int reason) {
+    if (client != client_) return;
+    ESP_LOGW(TAG, "Oral-B GATT disconnected, reason=%d; returning to scan", reason);
+    client_ = nullptr;
+    motionCharacteristic_ = nullptr;
+    connecting_ = false;
+    NimBLEDevice::deleteClient(client);
     NimBLEDevice::getScan()->start(scanWindowMs_, false, true);
 }

@@ -13,6 +13,7 @@ public:
     explicit BleBrushSource(QueueHandle_t outputQueue);
 
     bool begin(uint32_t scanWindowMs);
+    void handleClientDisconnect(NimBLEClient* client, int reason);
 
 private:
     QueueHandle_t queue_;
