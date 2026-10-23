@@ -31,8 +31,9 @@ private:
     BleBrushSource* owner_;
 };
 
-BleBrushSource::BleBrushSource(QueueHandle_t outputQueue)
+BleBrushSource::BleBrushSource(QueueHandle_t outputQueue, DebugState* debug)
     : queue_(outputQueue),
+      debug_(debug),
       scanWindowMs_(30000) {}
 
 bool BleBrushSource::begin(uint32_t scanWindowMs) {
@@ -56,6 +57,7 @@ bool BleBrushSource::begin(uint32_t scanWindowMs) {
     }
 
     ESP_LOGI(TAG, "Passive Oral-B scan started");
+    if (debug_) debug_->bleState = DebugState::BleState::Scanning;
     return true;
 }
 
@@ -109,6 +111,10 @@ void BleBrushSource::handleManufacturerData(const NimBLEAdvertisedDevice* device
 
         xQueueOverwrite(queue_, &snapshot);
         latestSnapshot_ = snapshot;
+        if (debug_) {
+            debug_->advertisementPackets++;
+            debug_->lastAdvertisementMs = nowMs;
+        }
 
         // The manufacturer packet is also the discovery trigger for the
         // direct GATT session. FF0D is not present in advertisements.
@@ -132,6 +138,12 @@ void BleBrushSource::handleManufacturerData(const NimBLEAdvertisedDevice* device
 void BleBrushSource::connectToBrush(const NimBLEAdvertisedDevice* device) {
     if (device == nullptr || connecting_ || client_ != nullptr) return;
     connecting_ = true;
+    if (debug_) {
+        debug_->bleState = DebugState::BleState::Connecting;
+        debug_->gattConnected = false;
+        debug_->motionSubscribed = false;
+        debug_->lastGattError = 0;
+    }
     brushAddress_ = device->getAddress();
     ESP_LOGI(TAG, "Connecting to Oral-B GATT device %s", brushAddress_.toString().c_str());
 
@@ -139,6 +151,7 @@ void BleBrushSource::connectToBrush(const NimBLEAdvertisedDevice* device) {
     client_ = NimBLEDevice::createClient();
     if (client_ == nullptr) {
         ESP_LOGW(TAG, "Unable to allocate Oral-B GATT client");
+        if (debug_) debug_->bleState = DebugState::BleState::Error;
         connecting_ = false;
         NimBLEDevice::getScan()->start(scanWindowMs_, false, true);
         return;
@@ -151,6 +164,10 @@ void BleBrushSource::connectToBrush(const NimBLEAdvertisedDevice* device) {
     // this function is called from the NimBLE scan callback.
     if (!client_->connect(brushAddress_, true, true, true)) {
         ESP_LOGW(TAG, "Oral-B GATT connection failed, last_error=%d", client_->getLastError());
+        if (debug_) {
+            debug_->bleState = DebugState::BleState::Error;
+            debug_->lastGattError = client_->getLastError();
+        }
         if (client_) {
             NimBLEDevice::deleteClient(client_);
             client_ = nullptr;
@@ -163,6 +180,11 @@ void BleBrushSource::connectToBrush(const NimBLEAdvertisedDevice* device) {
 
 void BleBrushSource::handleClientConnect(NimBLEClient* client) {
     if (client == nullptr || client != client_) return;
+    if (debug_) {
+        debug_->bleState = DebugState::BleState::Connected;
+        debug_->gattConnected = true;
+        debug_->rssi = static_cast<int16_t>(client->getRssi());
+    }
     ESP_LOGI(TAG, "Oral-B GATT link established; discovering services");
 
     // getServices() waits for a host-task callback, so do not call it from
@@ -193,6 +215,12 @@ void BleBrushSource::handleClientConnect(NimBLEClient* client) {
 void BleBrushSource::handleClientConnectFail(NimBLEClient* client, int reason) {
     if (client != client_) return;
     ESP_LOGW(TAG, "Oral-B GATT connection failed, reason=%d", reason);
+    if (debug_) {
+        debug_->bleState = DebugState::BleState::Error;
+        debug_->gattConnected = false;
+        debug_->motionSubscribed = false;
+        debug_->lastGattError = reason;
+    }
     client_ = nullptr;
     motionCharacteristic_ = nullptr;
     connecting_ = false;
@@ -226,6 +254,11 @@ void BleBrushSource::discoverAndSubscribe(NimBLEClient* client) {
     }
 
     connecting_ = false;
+    if (debug_) {
+        debug_->bleState = DebugState::BleState::Subscribed;
+        debug_->gattConnected = true;
+        debug_->motionSubscribed = true;
+    }
     ESP_LOGI(TAG, "Subscribed to Oral-B FF0D motion notifications");
 }
 
@@ -237,6 +270,11 @@ void BleBrushSource::handleMotion(const uint8_t* data, size_t length) {
     std::memcpy(snapshot.motionPayload.data(), data, snapshot.motionPayloadSize);
     snapshot.motionPacketCount = 1;
     snapshot.receivedAtMs = static_cast<uint32_t>(esp_timer_get_time() / 1000ULL);
+    if (debug_) {
+        debug_->motionPackets++;
+        debug_->lastMotionLength = static_cast<uint16_t>(length);
+        debug_->lastMotionMs = snapshot.receivedAtMs;
+    }
     xQueueOverwrite(queue_, &snapshot);
     ESP_LOGI(TAG, "FF0D motion notification length=%u", static_cast<unsigned>(length));
 }
@@ -255,6 +293,7 @@ void BleBrushSource::onScanEnd(const NimBLEScanResults&, int reason) {
         ESP_LOGI(TAG, "Scan ended (%d) for GATT hand-off", reason);
         return;
     }
+    if (debug_) debug_->bleState = DebugState::BleState::Scanning;
     ESP_LOGI(TAG, "Scan ended (%d), restarting", reason);
     NimBLEDevice::getScan()->start(scanWindowMs_, false, true);
 }
@@ -262,6 +301,12 @@ void BleBrushSource::onScanEnd(const NimBLEScanResults&, int reason) {
 void BleBrushSource::handleClientDisconnect(NimBLEClient* client, int reason) {
     if (client != client_) return;
     ESP_LOGW(TAG, "Oral-B GATT disconnected, reason=%d; returning to scan", reason);
+    if (debug_) {
+        debug_->bleState = DebugState::BleState::Scanning;
+        debug_->gattConnected = false;
+        debug_->motionSubscribed = false;
+        debug_->lastDisconnectReason = reason;
+    }
     client_ = nullptr;
     motionCharacteristic_ = nullptr;
     connecting_ = false;

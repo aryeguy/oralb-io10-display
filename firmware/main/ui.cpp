@@ -13,7 +13,8 @@ static lv_color_t color_from_hex(uint32_t hex) {
 
 static const char* TAG = "oralb_ui";
 
-bool BrushUi::begin() {
+bool BrushUi::begin(DebugState* debug) {
+    debug_ = debug;
     lv_display_t* display = bsp_display_start();
     if (display == nullptr) {
         return false;
@@ -108,9 +109,23 @@ bool BrushUi::begin() {
     lv_obj_set_style_text_color(coverageCaption, color_from_hex(0x6E8EA9), 0);
     lv_label_set_text(coverageCaption, "coverage");
 
+    debugButton_ = lv_btn_create(screen_);
+    lv_obj_set_size(debugButton_, 64, 34);
+    lv_obj_set_pos(debugButton_, 124, 400);
+    lv_obj_set_style_radius(debugButton_, 17, 0);
+    lv_obj_set_style_bg_color(debugButton_, color_from_hex(0x17344A), 0);
+    lv_obj_set_style_border_width(debugButton_, 1, 0);
+    lv_obj_set_style_border_color(debugButton_, color_from_hex(0x2A5974), 0);
+    lv_obj_add_event_cb(debugButton_, debugEvent, LV_EVENT_CLICKED, this);
+    lv_obj_t* debugButtonLabel = lv_label_create(debugButton_);
+    lv_obj_center(debugButtonLabel);
+    lv_obj_set_style_text_font(debugButtonLabel, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_color(debugButtonLabel, color_from_hex(0xB9D6E8), 0);
+    lv_label_set_text(debugButtonLabel, "DEBUG");
+
     resetButton_ = lv_btn_create(screen_);
-    lv_obj_set_size(resetButton_, 72, 34);
-    lv_obj_set_pos(resetButton_, 148, 400);
+    lv_obj_set_size(resetButton_, 64, 34);
+    lv_obj_set_pos(resetButton_, 190, 400);
     lv_obj_set_style_radius(resetButton_, 17, 0);
     lv_obj_set_style_bg_color(resetButton_, color_from_hex(0x17344A), 0);
     lv_obj_set_style_border_width(resetButton_, 1, 0);
@@ -121,6 +136,39 @@ bool BrushUi::begin() {
     lv_obj_set_style_text_font(resetButtonLabel_, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(resetButtonLabel_, color_from_hex(0xB9D6E8), 0);
     lv_label_set_text(resetButtonLabel_, "RESET");
+
+    // Full-screen, readable transport diagnostics. The panel is intentionally
+    // available on the device itself, so USB serial logs are not required to
+    // distinguish BLE, Wi-Fi, and classifier failures.
+    debugOverlay_ = lv_obj_create(screen_);
+    lv_obj_set_size(debugOverlay_, 348, 428);
+    lv_obj_set_pos(debugOverlay_, 10, 10);
+    lv_obj_set_style_radius(debugOverlay_, 18, 0);
+    lv_obj_set_style_bg_color(debugOverlay_, color_from_hex(0x06131F), 0);
+    lv_obj_set_style_bg_opa(debugOverlay_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(debugOverlay_, 2, 0);
+    lv_obj_set_style_border_color(debugOverlay_, color_from_hex(0x2A5974), 0);
+    debugText_ = lv_label_create(debugOverlay_);
+    lv_obj_set_width(debugText_, 320);
+    lv_obj_set_pos(debugText_, 14, 18);
+    lv_obj_set_style_text_font(debugText_, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_color(debugText_, color_from_hex(0xDCEEFF), 0);
+    lv_label_set_text(debugText_, "TRANSPORT DEBUG\nWaiting for diagnostics...");
+
+    debugCloseButton_ = lv_btn_create(debugOverlay_);
+    lv_obj_set_size(debugCloseButton_, 82, 34);
+    lv_obj_set_pos(debugCloseButton_, 250, 376);
+    lv_obj_set_style_radius(debugCloseButton_, 17, 0);
+    lv_obj_set_style_bg_color(debugCloseButton_, color_from_hex(0x17344A), 0);
+    lv_obj_set_style_border_width(debugCloseButton_, 1, 0);
+    lv_obj_set_style_border_color(debugCloseButton_, color_from_hex(0x2A5974), 0);
+    lv_obj_add_event_cb(debugCloseButton_, debugEvent, LV_EVENT_CLICKED, this);
+    lv_obj_t* closeLabel = lv_label_create(debugCloseButton_);
+    lv_obj_center(closeLabel);
+    lv_obj_set_style_text_font(closeLabel, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_color(closeLabel, color_from_hex(0xB9D6E8), 0);
+    lv_label_set_text(closeLabel, "CLOSE");
+    lv_obj_add_flag(debugOverlay_, LV_OBJ_FLAG_HIDDEN);
 
     bsp_display_unlock();
     ESP_LOGI(TAG, "Display UI ready");
@@ -241,6 +289,67 @@ void BrushUi::celebrationAnimation(void* object, int32_t value) {
 void BrushUi::resetEvent(lv_event_t* event) {
     auto* ui = static_cast<BrushUi*>(lv_event_get_user_data(event));
     if (ui != nullptr) ui->resetRequested_ = true;
+}
+
+void BrushUi::debugEvent(lv_event_t* event) {
+    auto* ui = static_cast<BrushUi*>(lv_event_get_user_data(event));
+    if (ui != nullptr) ui->toggleDebug();
+}
+
+void BrushUi::toggleDebug() {
+    debugVisible_ = !debugVisible_;
+    if (debugOverlay_ == nullptr) return;
+    if (debugVisible_) {
+        lv_obj_clear_flag(debugOverlay_, LV_OBJ_FLAG_HIDDEN);
+        renderDebug();
+    } else {
+        lv_obj_add_flag(debugOverlay_, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+void BrushUi::renderDebug() {
+    if (debugText_ == nullptr) return;
+    if (debug_ == nullptr) {
+        lv_label_set_text(debugText_, "TRANSPORT DEBUG\nNo diagnostics source");
+        return;
+    }
+
+    char text[640];
+    const char* wifi = debug_->wifiConnected ? "UP" : "DOWN";
+    const char* server = debug_->serverReachable ? "REACHABLE" : "NO RESPONSE";
+    const char* gatt = debug_->gattConnected ? "UP" : "DOWN";
+    const char* motion = debug_->motionSubscribed ? "SUBSCRIBED" : "NOT SUBSCRIBED";
+    std::snprintf(
+        text,
+        sizeof(text),
+        "TRANSPORT DEBUG\n\n"
+        "Wi-Fi       %s\n"
+        "IP          %s\n"
+        "Server      %s (HTTP %d)\n\n"
+        "BLE         %s\n"
+        "GATT        %s\n"
+        "Motion      %s\n"
+        "RSSI        %d dBm\n"
+        "Advertisements %lu\n"
+        "Motion packets %lu\n"
+        "Last motion  %u bytes\n"
+        "GATT error   %d\n"
+        "Disconnect   %d",
+        wifi,
+        debug_->ipAddress,
+        server,
+        debug_->lastHttpStatus,
+        debug_ble_state_name(debug_->bleState),
+        gatt,
+        motion,
+        static_cast<int>(debug_->rssi),
+        static_cast<unsigned long>(debug_->advertisementPackets),
+        static_cast<unsigned long>(debug_->motionPackets),
+        static_cast<unsigned>(debug_->lastMotionLength),
+        debug_->lastGattError,
+        debug_->lastDisconnectReason
+    );
+    lv_label_set_text(debugText_, text);
 }
 
 void BrushUi::pulseSurface(size_t index) {
@@ -381,6 +490,8 @@ void BrushUi::render(const BrushState& state) {
 
     std::snprintf(buf, sizeof(buf), "%lu%%", static_cast<unsigned long>(avg));
     lv_label_set_text(coverageLabel_, buf);
+
+    if (debugVisible_) renderDebug();
 
     bsp_display_unlock();
 }

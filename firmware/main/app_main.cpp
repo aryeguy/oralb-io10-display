@@ -24,8 +24,9 @@ extern "C" void app_main(void) {
         return;
     }
 
+    DebugState debug;
     BrushUi ui;
-    if (!ui.begin()) {
+    if (!ui.begin(&debug)) {
         ESP_LOGE(TAG, "Display initialization failed");
         return;
     }
@@ -42,10 +43,10 @@ extern "C" void app_main(void) {
 
     if (app_config::kUseMacServer) {
         ESP_LOGI(TAG, "Using Mac server state source");
-        macClient.begin();
+        macClient.begin(&debug);
         // Bluetooth remains local to the ESP32. The Pi only receives the
         // decoded advertisement state over Wi-Fi.
-        bleSource = std::make_unique<BleBrushSource>(queue);
+        bleSource = std::make_unique<BleBrushSource>(queue, &debug);
         if (!bleSource->begin(app_config::kScanWindowMs)) {
             ESP_LOGE(TAG, "ESP32 BLE source failed to start");
         }
@@ -54,7 +55,7 @@ extern "C" void app_main(void) {
         mockSource.begin(nowMs);
     } else {
         ESP_LOGI(TAG, "Using passive BLE source");
-        bleSource = std::make_unique<BleBrushSource>(queue);
+        bleSource = std::make_unique<BleBrushSource>(queue, &debug);
         if (!bleSource->begin(app_config::kScanWindowMs)) {
             ESP_LOGE(TAG, "BLE source failed to start");
         }

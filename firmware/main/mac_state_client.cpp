@@ -12,6 +12,7 @@
 #include "nvs_flash.h"
 
 #include <cstdlib>
+#include <cstdio>
 #include <cstring>
 #include <string>
 
@@ -25,7 +26,8 @@ static esp_err_t http_event(esp_http_client_event_t* event) {
     return ESP_OK;
 }
 
-bool MacStateClient::begin() {
+bool MacStateClient::begin(DebugState* debug) {
+    debug_ = debug;
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         nvs_flash_erase();
@@ -45,7 +47,8 @@ bool MacStateClient::begin() {
         ESP_LOGE(TAG, "event loop init failed: %s", esp_err_to_name(err));
         return false;
     }
-    if (!esp_netif_create_default_wifi_sta()) {
+    staNetif_ = esp_netif_create_default_wifi_sta();
+    if (!staNetif_) {
         ESP_LOGE(TAG, "failed to create Wi-Fi station interface");
         return false;
     }
@@ -60,6 +63,7 @@ bool MacStateClient::begin() {
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_ERROR_CHECK(esp_wifi_connect());
+    if (debug_) debug_->serverReachable = false;
     ESP_LOGI(TAG, "Connecting to Wi-Fi network '%s'", ORALB_WIFI_SSID);
     return true;
 }
@@ -69,10 +73,23 @@ bool MacStateClient::update(uint32_t nowMs, BrushSnapshot& snapshot) {
     lastPollMs_ = nowMs;
     wifi_ap_record_t ap{};
     if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
+        if (debug_) debug_->wifiConnected = false;
         if (connected_) ESP_LOGW(TAG, "Wi-Fi disconnected");
         connected_ = false;
         esp_wifi_connect();
         return false;
+    }
+    if (debug_) {
+        debug_->wifiConnected = true;
+        esp_netif_ip_info_t ipInfo{};
+        if (staNetif_ && esp_netif_get_ip_info(staNetif_, &ipInfo) == ESP_OK) {
+            std::snprintf(
+                debug_->ipAddress,
+                sizeof(debug_->ipAddress),
+                IPSTR,
+                IP2STR(&ipInfo.ip)
+            );
+        }
     }
     connected_ = true;
     std::string body;
@@ -86,10 +103,17 @@ bool MacStateClient::update(uint32_t nowMs, BrushSnapshot& snapshot) {
     config.event_handler = http_event;
     config.user_data = &body;
     esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client) return false;
+    if (!client) {
+        if (debug_) debug_->serverReachable = false;
+        return false;
+    }
     esp_err_t err = esp_http_client_perform(client);
     int status = esp_http_client_get_status_code(client);
     esp_http_client_cleanup(client);
+    if (debug_) {
+        debug_->lastHttpStatus = status;
+        debug_->serverReachable = err == ESP_OK && status == 200;
+    }
     if (err != ESP_OK || status != 200) return false;
 
     cJSON* root = cJSON_ParseWithLength(body.data(), body.size());
@@ -150,7 +174,10 @@ bool MacStateClient::reset(uint32_t nowMs) {
 
 bool MacStateClient::publish(const BrushSnapshot& snapshot) {
     wifi_ap_record_t ap{};
-    if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK) return false;
+    if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
+        if (debug_) debug_->wifiConnected = false;
+        return false;
+    }
 
     cJSON* root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "valid", snapshot.valid);
@@ -182,6 +209,7 @@ bool MacStateClient::publish(const BrushSnapshot& snapshot) {
     config.keep_alive_enable = false;
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) {
+        if (debug_) debug_->serverReachable = false;
         cJSON_free(encoded);
         return false;
     }
@@ -191,5 +219,9 @@ bool MacStateClient::publish(const BrushSnapshot& snapshot) {
     const int status = esp_http_client_get_status_code(client);
     esp_http_client_cleanup(client);
     cJSON_free(encoded);
+    if (debug_) {
+        debug_->lastHttpStatus = status;
+        if (err == ESP_OK && status == 200) debug_->serverReachable = true;
+    }
     return err == ESP_OK && status == 200;
 }

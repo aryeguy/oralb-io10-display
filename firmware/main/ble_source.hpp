@@ -1,6 +1,7 @@
 #pragma once
 
 #include "brush_snapshot.hpp"
+#include "debug_state.hpp"
 #include "oralb_adv_parser.hpp"
 
 #include "NimBLEDevice.h"
@@ -10,7 +11,7 @@
 
 class BleBrushSource : public NimBLEScanCallbacks {
 public:
-    explicit BleBrushSource(QueueHandle_t outputQueue);
+    explicit BleBrushSource(QueueHandle_t outputQueue, DebugState* debug = nullptr);
 
     bool begin(uint32_t scanWindowMs);
     void handleClientDisconnect(NimBLEClient* client, int reason);
@@ -19,6 +20,7 @@ public:
 
 private:
     QueueHandle_t queue_;
+    DebugState* debug_ = nullptr;
     uint32_t scanWindowMs_;
     OralBAdvParser parser_;
     BrushSnapshot latestSnapshot_;

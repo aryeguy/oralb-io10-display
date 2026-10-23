@@ -1,6 +1,7 @@
 #pragma once
 
 #include "brush_state.hpp"
+#include "debug_state.hpp"
 
 #include "lvgl.h"
 
@@ -8,7 +9,7 @@
 
 class BrushUi {
 public:
-    bool begin();
+    bool begin(DebugState* debug = nullptr);
     void render(const BrushState& state);
     bool consumeResetRequest();
     void resetVisualState();
@@ -25,12 +26,18 @@ private:
     lv_obj_t* celebrationLabel_ = nullptr;
     lv_obj_t* resetButton_ = nullptr;
     lv_obj_t* resetButtonLabel_ = nullptr;
+    lv_obj_t* debugButton_ = nullptr;
+    lv_obj_t* debugOverlay_ = nullptr;
+    lv_obj_t* debugText_ = nullptr;
+    lv_obj_t* debugCloseButton_ = nullptr;
+    DebugState* debug_ = nullptr;
 
     std::array<lv_obj_t*, kMouthSurfaceCount> surfaces_{};
     std::array<uint8_t, kMouthSurfaceCount> previousCoverage_{};
     bool hasRendered_ = false;
     bool previousAllComplete_ = false;
     bool resetRequested_ = false;
+    bool debugVisible_ = false;
 
     void buildMouth();
     void makeCircle(size_t index, int x, int y, int size);
@@ -41,4 +48,7 @@ private:
     static void borderAnimation(void* object, int32_t value);
     static void celebrationAnimation(void* object, int32_t value);
     static void resetEvent(lv_event_t* event);
+    static void debugEvent(lv_event_t* event);
+    void toggleDebug();
+    void renderDebug();
 };
