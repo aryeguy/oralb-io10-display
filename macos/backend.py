@@ -165,6 +165,11 @@ class OralBBridge:
                 and self._last_motion_at is not None
                 and time.monotonic() - self._last_motion_at > 1.5
             ):
+                if self._timer_anchor is not None:
+                    anchor, observed = self._timer_anchor
+                    self.brush["elapsed_seconds"] = anchor + int(
+                        time.monotonic() - observed
+                    )
                 self.brush["brushing"] = False
                 self._timer_anchor = None
                 self.position_engine.set_brushing(False)
@@ -726,6 +731,14 @@ def create_app(bridge: OralBBridge, open_browser: bool = False, port: int = 8765
             # its advertisement state at idle/menu throughout a real session.
             active._last_motion_at = now
             values["brushing"] = True
+            if (
+                active.brush.get("brushing")
+                and int(values.get("elapsed_seconds") or 0) == 0
+            ):
+                # The ESP32's cached advertisement often remains at 00:00
+                # after the GATT connection stops scanning. Keep the server's
+                # running timer anchor instead of resetting it every batch.
+                values.pop("elapsed_seconds", None)
         elif (
             values.get("brushing") is False
             and active._last_motion_at is not None
