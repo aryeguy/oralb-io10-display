@@ -698,13 +698,11 @@ def create_app(bridge: OralBBridge, open_browser: bool = False, port: int = 8765
                 values.update(motion_decoded)
                 # FF0D is emitted while the brush is physically moving. Some
                 # iO10 sessions keep the advertisement state at idle/menu
-                # while still streaming motion, so do not discard those
-                # samples before they reach the classifier.
-                if (
-                    motion_decoded.get("motion_samples")
-                    and not values.get("brushing")
-                    and int(values.get("elapsed_seconds") or 0) > 0
-                ):
+                # while still streaming motion, so the motion stream is the
+                # authoritative brushing signal for this request. Without
+                # this override the classifier is fed every packet with
+                # brushing=False and coverage remains permanently zero.
+                if motion_decoded.get("motion_samples"):
                     values["brushing"] = True
             except ValueError:
                 logging.debug("Invalid ESP32 motion payload: %r", motion_hex)
