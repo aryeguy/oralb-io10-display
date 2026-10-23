@@ -15,6 +15,14 @@ class BrushClientCallbacks final : public NimBLEClientCallbacks {
 public:
     explicit BrushClientCallbacks(BleBrushSource* owner) : owner_(owner) {}
 
+    void onConnect(NimBLEClient* client) override {
+        if (owner_) owner_->handleClientConnect(client);
+    }
+
+    void onConnectFail(NimBLEClient* client, int reason) override {
+        if (owner_) owner_->handleClientConnectFail(client, reason);
+    }
+
     void onDisconnect(NimBLEClient* client, int reason) override {
         if (owner_) owner_->handleClientDisconnect(client, reason);
     }
@@ -138,7 +146,10 @@ void BleBrushSource::connectToBrush(const NimBLEAdvertisedDevice* device) {
     client_->setClientCallbacks(new BrushClientCallbacks(this), true);
     client_->setConnectTimeout(10000);
     client_->setConnectRetries(3);
-    if (!client_->connect(device)) {
+    // Use the copied address; the advertisement object belongs to the scan
+    // and may be released by scan->stop(). Connect asynchronously because
+    // this function is called from the NimBLE scan callback.
+    if (!client_->connect(brushAddress_, true, true, true)) {
         ESP_LOGW(TAG, "Oral-B GATT connection failed, last_error=%d", client_->getLastError());
         if (client_) {
             NimBLEDevice::deleteClient(client_);
@@ -148,6 +159,49 @@ void BleBrushSource::connectToBrush(const NimBLEAdvertisedDevice* device) {
         NimBLEDevice::getScan()->start(scanWindowMs_, false, true);
         return;
     }
+}
+
+void BleBrushSource::handleClientConnect(NimBLEClient* client) {
+    if (client == nullptr || client != client_) return;
+    ESP_LOGI(TAG, "Oral-B GATT link established; discovering services");
+
+    // getServices() waits for a host-task callback, so do not call it from
+    // NimBLEClientCallbacks::onConnect itself.
+    struct TaskArgs {
+        BleBrushSource* owner;
+        NimBLEClient* client;
+    };
+    auto* args = new TaskArgs{this, client};
+    if (xTaskCreate(
+            [](void* context) {
+                auto* taskArgs = static_cast<TaskArgs*>(context);
+                taskArgs->owner->discoverAndSubscribe(taskArgs->client);
+                delete taskArgs;
+                vTaskDelete(nullptr);
+            },
+            "oralb_gatt",
+            8192,
+            args,
+            5,
+            nullptr) != pdPASS) {
+        delete args;
+        ESP_LOGE(TAG, "Unable to create GATT discovery task");
+        client->disconnect();
+    }
+}
+
+void BleBrushSource::handleClientConnectFail(NimBLEClient* client, int reason) {
+    if (client != client_) return;
+    ESP_LOGW(TAG, "Oral-B GATT connection failed, reason=%d", reason);
+    client_ = nullptr;
+    motionCharacteristic_ = nullptr;
+    connecting_ = false;
+    NimBLEDevice::deleteClient(client);
+    NimBLEDevice::getScan()->start(scanWindowMs_, false, true);
+}
+
+void BleBrushSource::discoverAndSubscribe(NimBLEClient* client) {
+    if (client == nullptr || client != client_ || !client->isConnected()) return;
 
     ESP_LOGI(TAG, "Oral-B GATT connected, RSSI=%d; discovering services", client_->getRssi());
     const auto& services = client_->getServices();
@@ -157,10 +211,6 @@ void BleBrushSource::connectToBrush(const NimBLEAdvertisedDevice* device) {
     if (motionCharacteristic_ == nullptr || !motionCharacteristic_->canNotify()) {
         ESP_LOGW(TAG, "Oral-B GATT connected but FF0D notifications unavailable (service=%s)", service ? "yes" : "no");
         client_->disconnect();
-        NimBLEDevice::deleteClient(client_);
-        client_ = nullptr;
-        connecting_ = false;
-        NimBLEDevice::getScan()->start(scanWindowMs_, false, true);
         return;
     }
 
@@ -172,10 +222,6 @@ void BleBrushSource::connectToBrush(const NimBLEAdvertisedDevice* device) {
     if (!subscribed) {
         ESP_LOGW(TAG, "FF0D notification subscription failed");
         client_->disconnect();
-        NimBLEDevice::deleteClient(client_);
-        client_ = nullptr;
-        connecting_ = false;
-        NimBLEDevice::getScan()->start(scanWindowMs_, false, true);
         return;
     }
 

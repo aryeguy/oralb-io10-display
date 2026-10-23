@@ -14,6 +14,8 @@ public:
 
     bool begin(uint32_t scanWindowMs);
     void handleClientDisconnect(NimBLEClient* client, int reason);
+    void handleClientConnect(NimBLEClient* client);
+    void handleClientConnectFail(NimBLEClient* client, int reason);
 
 private:
     QueueHandle_t queue_;
@@ -31,5 +33,6 @@ private:
     bool isOralB(const NimBLEAdvertisedDevice* device) const;
     void handleManufacturerData(const NimBLEAdvertisedDevice* device);
     void connectToBrush(const NimBLEAdvertisedDevice* device);
+    void discoverAndSubscribe(NimBLEClient* client);
     void handleMotion(const uint8_t* data, size_t length);
 };
