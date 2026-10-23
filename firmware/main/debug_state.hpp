@@ -12,8 +12,11 @@ struct DebugState {
     bool serverReachable = false;
     bool gattConnected = false;
     bool motionSubscribed = false;
+    bool brushBrushing = false;
     uint32_t advertisementPackets = 0;
     uint32_t motionPackets = 0;
+    uint32_t serverMotionPackets = 0;
+    uint32_t elapsedSeconds = 0;
     uint16_t lastMotionLength = 0;
     int16_t rssi = 0;
     int lastGattError = 0;
@@ -22,6 +25,7 @@ struct DebugState {
     uint32_t lastAdvertisementMs = 0;
     uint32_t lastMotionMs = 0;
     char ipAddress[16] = "--";
+    char classifierStatus[20] = "--";
 };
 
 inline const char* debug_ble_state_name(DebugState::BleState state) {

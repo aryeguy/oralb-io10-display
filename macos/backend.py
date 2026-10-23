@@ -666,10 +666,12 @@ def create_app(bridge: OralBBridge, open_browser: bool = False, port: int = 8765
             for key in (
                 "valid", "brushing", "elapsed_seconds", "pressure", "mode_raw",
                 "pacer_sector", "pacer_sector_count", "pacer_sector_timer",
+                "motion_packet_count", "motion_format",
             )
         }
         position = brush.get("position", {})
         compact_brush["position"] = {
+            "status": position.get("status", "ready"),
             "active_surface": position.get("active_surface"),
             "confidence": position.get("confidence", 0.0),
             "coverage": position.get("coverage", [0.0] * 16),
@@ -694,6 +696,16 @@ def create_app(bridge: OralBBridge, open_browser: bool = False, port: int = 8765
             try:
                 motion_decoded = parse_motion(bytes.fromhex(motion_hex))
                 values.update(motion_decoded)
+                # FF0D is emitted while the brush is physically moving. Some
+                # iO10 sessions keep the advertisement state at idle/menu
+                # while still streaming motion, so do not discard those
+                # samples before they reach the classifier.
+                if (
+                    motion_decoded.get("motion_samples")
+                    and not values.get("brushing")
+                    and int(values.get("elapsed_seconds") or 0) > 0
+                ):
+                    values["brushing"] = True
             except ValueError:
                 logging.debug("Invalid ESP32 motion payload: %r", motion_hex)
         values["source"] = "esp32_ble"

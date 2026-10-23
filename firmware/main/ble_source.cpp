@@ -114,6 +114,8 @@ void BleBrushSource::handleManufacturerData(const NimBLEAdvertisedDevice* device
         if (debug_) {
             debug_->advertisementPackets++;
             debug_->lastAdvertisementMs = nowMs;
+            debug_->brushBrushing = snapshot.brushing;
+            debug_->elapsedSeconds = snapshot.elapsedSeconds;
         }
 
         // The manufacturer packet is also the discovery trigger for the

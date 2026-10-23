@@ -133,6 +133,19 @@ bool MacStateClient::update(uint32_t nowMs, BrushSnapshot& snapshot) {
     snapshot.pacerSectorCount = static_cast<uint8_t>(number(brush, "pacer_sector_count", 0));
     snapshot.pacerSectorTimer = static_cast<uint8_t>(number(brush, "pacer_sector_timer", 0));
     snapshot.receivedAtMs = nowMs;
+    if (debug_) {
+        debug_->brushBrushing = snapshot.brushing;
+        debug_->elapsedSeconds = snapshot.elapsedSeconds;
+        cJSON* serverMotion = cJSON_GetObjectItem(brush, "motion_packet_count");
+        if (cJSON_IsNumber(serverMotion)) {
+            debug_->serverMotionPackets = static_cast<uint32_t>(serverMotion->valuedouble);
+        }
+        const char* classifier = cJSON_GetStringValue(cJSON_GetObjectItem(position, "status"));
+        if (classifier) {
+            std::strncpy(debug_->classifierStatus, classifier, sizeof(debug_->classifierStatus) - 1);
+            debug_->classifierStatus[sizeof(debug_->classifierStatus) - 1] = '\0';
+        }
+    }
     const char* pressure = cJSON_GetStringValue(cJSON_GetObjectItem(brush, "pressure"));
     snapshot.pressure = pressure && std::strcmp(pressure, "high") == 0 ? Pressure::High
         : pressure && std::strcmp(pressure, "low") == 0 ? Pressure::Low : Pressure::Normal;

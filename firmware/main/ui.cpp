@@ -329,9 +329,12 @@ void BrushUi::renderDebug() {
         "BLE         %s\n"
         "GATT        %s\n"
         "Motion      %s\n"
+        "Brush       %s  %02lu:%02lu\n"
         "RSSI        %d dBm\n"
         "Advertisements %lu\n"
         "Motion packets %lu\n"
+        "Server motion  %lu\n"
+        "Classifier  %s\n"
         "Last motion  %u bytes\n"
         "GATT error   %d\n"
         "Disconnect   %d",
@@ -342,9 +345,14 @@ void BrushUi::renderDebug() {
         debug_ble_state_name(debug_->bleState),
         gatt,
         motion,
+        debug_->brushBrushing ? "ON" : "OFF",
+        static_cast<unsigned long>(debug_->elapsedSeconds / 60),
+        static_cast<unsigned long>(debug_->elapsedSeconds % 60),
         static_cast<int>(debug_->rssi),
         static_cast<unsigned long>(debug_->advertisementPackets),
         static_cast<unsigned long>(debug_->motionPackets),
+        static_cast<unsigned long>(debug_->serverMotionPackets),
+        debug_->classifierStatus,
         static_cast<unsigned>(debug_->lastMotionLength),
         debug_->lastGattError,
         debug_->lastDisconnectReason
