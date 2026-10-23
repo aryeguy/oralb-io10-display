@@ -7,8 +7,8 @@ namespace app_config {
 // Set true for UI development without the toothbrush.
 constexpr bool kUseMockBrush = false;
 
-// The Mac performs direct BLE/GATT and the official Comino classification;
-// the ESP32 receives the resulting state over the local network.
+// The ESP32 owns BLE/GATT. The Pi server receives raw telemetry over Wi-Fi
+// and runs the official Comino classification; the ESP32 renders the result.
 constexpr bool kUseMacServer = true;
 constexpr const char* kMacServerUrl = "http://192.168.0.139:8765/api/display-state";
 constexpr const char* kMacResetUrl = "http://192.168.0.139:8765/api/reset";
