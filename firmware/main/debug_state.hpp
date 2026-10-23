@@ -15,6 +15,7 @@ struct DebugState {
     bool brushBrushing = false;
     uint32_t advertisementPackets = 0;
     uint32_t motionPackets = 0;
+    uint32_t droppedQueuePackets = 0;
     uint32_t serverMotionPackets = 0;
     uint32_t elapsedSeconds = 0;
     uint16_t lastMotionLength = 0;

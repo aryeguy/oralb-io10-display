@@ -12,13 +12,17 @@
 #include "freertos/task.h"
 
 #include <memory>
+#include <vector>
 
 static const char* TAG = "oralb_app";
 
 extern "C" void app_main(void) {
     ESP_LOGI(TAG, "Starting Oral-B iO display");
 
-    QueueHandle_t queue = xQueueCreate(1, sizeof(BrushSnapshot));
+    // FF0D carries two samples per notification at roughly 13 packets/sec.
+    // A one-slot overwrite queue silently reduced this to the 2 Hz UI loop,
+    // which made the 26 Hz recurrent model impossible to run correctly.
+    QueueHandle_t queue = xQueueCreate(64, sizeof(BrushSnapshot));
     if (queue == nullptr) {
         ESP_LOGE(TAG, "Failed to create state queue");
         return;
@@ -62,15 +66,22 @@ extern "C" void app_main(void) {
     }
 
     TickType_t lastWake = xTaskGetTickCount();
+    std::vector<BrushSnapshot> telemetryBatch;
+    telemetryBatch.reserve(64);
 
     while (true) {
         nowMs = static_cast<uint32_t>(esp_timer_get_time() / 1000ULL);
 
         if (app_config::kUseMacServer) {
+            telemetryBatch.clear();
             BrushSnapshot localSnapshot;
-            if (xQueueReceive(queue, &localSnapshot, 0) == pdTRUE) {
+            while (telemetryBatch.size() < 64 &&
+                   xQueueReceive(queue, &localSnapshot, 0) == pdTRUE) {
                 model.apply(localSnapshot);
-                macClient.publish(localSnapshot);
+                telemetryBatch.push_back(localSnapshot);
+            }
+            if (!telemetryBatch.empty()) {
+                macClient.publish(telemetryBatch.data(), telemetryBatch.size());
             }
             BrushSnapshot snapshot;
             if (macClient.update(nowMs, snapshot)) model.apply(snapshot);

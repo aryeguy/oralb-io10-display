@@ -37,4 +37,5 @@ private:
     void connectToBrush(const NimBLEAdvertisedDevice* device);
     void discoverAndSubscribe(NimBLEClient* client);
     void handleMotion(const uint8_t* data, size_t length);
+    void enqueueSnapshot(const BrushSnapshot& snapshot);
 };

@@ -109,7 +109,7 @@ void BleBrushSource::handleManufacturerData(const NimBLEAdvertisedDevice* device
             continue;
         }
 
-        xQueueOverwrite(queue_, &snapshot);
+        enqueueSnapshot(snapshot);
         latestSnapshot_ = snapshot;
         if (debug_) {
             debug_->advertisementPackets++;
@@ -277,8 +277,21 @@ void BleBrushSource::handleMotion(const uint8_t* data, size_t length) {
         debug_->lastMotionLength = static_cast<uint16_t>(length);
         debug_->lastMotionMs = snapshot.receivedAtMs;
     }
-    xQueueOverwrite(queue_, &snapshot);
-    ESP_LOGI(TAG, "FF0D motion notification length=%u", static_cast<unsigned>(length));
+    enqueueSnapshot(snapshot);
+    ESP_LOGD(TAG, "FF0D motion notification length=%u", static_cast<unsigned>(length));
+}
+
+void BleBrushSource::enqueueSnapshot(const BrushSnapshot& snapshot) {
+    if (xQueueSend(queue_, &snapshot, 0) == pdTRUE) return;
+
+    // Preserve the newest telemetry if Wi-Fi briefly takes longer than one
+    // batch interval. The queue is deliberately deep enough for roughly two
+    // seconds of FF0D traffic; reaching this path means the oldest packet is
+    // already too stale to be useful to the recurrent model.
+    BrushSnapshot discarded;
+    xQueueReceive(queue_, &discarded, 0);
+    if (debug_) debug_->droppedQueuePackets++;
+    xQueueSend(queue_, &snapshot, 0);
 }
 
 void BleBrushSource::onResult(const NimBLEAdvertisedDevice* device) {

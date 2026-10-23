@@ -335,6 +335,7 @@ void BrushUi::renderDebug() {
         "RSSI        %d dBm\n"
         "Advertisements %lu\n"
         "Motion packets %lu\n"
+        "Queue drops    %lu\n"
         "Server motion  %lu\n"
         "Classifier  %s\n"
         "Last motion  %u bytes\n"
@@ -353,6 +354,7 @@ void BrushUi::renderDebug() {
         static_cast<int>(debug_->rssi),
         static_cast<unsigned long>(debug_->advertisementPackets),
         static_cast<unsigned long>(debug_->motionPackets),
+        static_cast<unsigned long>(debug_->droppedQueuePackets),
         static_cast<unsigned long>(debug_->serverMotionPackets),
         debug_->classifierStatus,
         static_cast<unsigned>(debug_->lastMotionLength),

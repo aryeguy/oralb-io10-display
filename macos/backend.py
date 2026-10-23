@@ -120,6 +120,7 @@ class OralBBridge:
         self._target_device_id: str | None = None
         self._timer_anchor: tuple[int, float] | None = None
         self._motion_times: deque[float] = deque(maxlen=240)
+        self._last_motion_at: float | None = None
         self._mock_elapsed = 0.0
         self._mock_started_at = 0.0
         self._mock_running = False
@@ -159,6 +160,15 @@ class OralBBridge:
     async def _ticker(self) -> None:
         while True:
             await asyncio.sleep(1)
+            if (
+                self.brush.get("brushing")
+                and self._last_motion_at is not None
+                and time.monotonic() - self._last_motion_at > 1.5
+            ):
+                self.brush["brushing"] = False
+                self._timer_anchor = None
+                self.position_engine.set_brushing(False)
+                self.brush["position"] = self.position_engine.position_state()
             self.schedule_publish(0)
 
     def _on_detection(self, device: Any, advertisement: Any) -> None:
@@ -379,6 +389,7 @@ class OralBBridge:
         )
         if name == "motion":
             now = time.monotonic()
+            self._last_motion_at = now
             self._motion_times.append(now)
             while self._motion_times and now - self._motion_times[0] > 2:
                 self._motion_times.popleft()
@@ -690,33 +701,49 @@ def create_app(bridge: OralBBridge, open_browser: bool = False, port: int = 8765
             )
             if key in payload
         }
-        motion_hex = payload.get("motion_payload_hex")
-        motion_decoded = None
-        if isinstance(motion_hex, str) and motion_hex:
+        motion_hexes = payload.get("motion_payloads_hex")
+        if not isinstance(motion_hexes, list):
+            legacy_motion = payload.get("motion_payload_hex")
+            motion_hexes = [legacy_motion] if isinstance(legacy_motion, str) else []
+
+        decoded_packets: list[dict[str, Any]] = []
+        motion_samples: list[dict[str, int]] = []
+        for motion_hex in motion_hexes:
+            if not isinstance(motion_hex, str) or not motion_hex:
+                continue
             try:
-                motion_decoded = parse_motion(bytes.fromhex(motion_hex))
-                values.update(motion_decoded)
-                # FF0D is emitted while the brush is physically moving. Some
-                # iO10 sessions keep the advertisement state at idle/menu
-                # while still streaming motion, so the motion stream is the
-                # authoritative brushing signal for this request. Without
-                # this override the classifier is fed every packet with
-                # brushing=False and coverage remains permanently zero.
-                if motion_decoded.get("motion_samples"):
-                    values["brushing"] = True
+                decoded = parse_motion(bytes.fromhex(motion_hex))
+                decoded_packets.append(decoded)
+                motion_samples.extend(decoded.get("motion_samples", []))
             except ValueError:
                 logging.debug("Invalid ESP32 motion payload: %r", motion_hex)
+
+        now = time.monotonic()
+        if decoded_packets:
+            values.update(decoded_packets[-1])
+        if motion_samples:
+            # FF0D is authoritative while it is flowing. The iO10 can leave
+            # its advertisement state at idle/menu throughout a real session.
+            active._last_motion_at = now
+            values["brushing"] = True
+        elif (
+            values.get("brushing") is False
+            and active._last_motion_at is not None
+            and now - active._last_motion_at <= 1.5
+        ):
+            # Do not let an interleaved idle advertisement reset the RNN in
+            # the middle of a continuous motion stream.
+            values["brushing"] = True
         values["source"] = "esp32_ble"
         active._apply_update(values, source="esp32_ble", name="ESP32 BLE relay", device_id="esp32")
-        if motion_decoded is not None:
-            now = time.monotonic()
-            active._motion_times.append(now)
+        if decoded_packets:
+            active._motion_times.extend(now for _ in decoded_packets)
             while active._motion_times and now - active._motion_times[0] > 2:
                 active._motion_times.popleft()
-            active.brush["motion_packet_count"] += 1
+            active.brush["motion_packet_count"] += len(decoded_packets)
             active.brush["motion_rate_hz"] = round(len(active._motion_times) / 2, 1)
             active.position_engine.ingest(
-                motion_decoded.get("motion_samples", []),
+                motion_samples,
                 bool(active.brush.get("brushing")),
             )
             active.brush["position"] = active.position_engine.position_state()

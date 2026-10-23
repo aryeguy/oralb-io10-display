@@ -185,13 +185,15 @@ bool MacStateClient::reset(uint32_t nowMs) {
     return err == ESP_OK && status == 200;
 }
 
-bool MacStateClient::publish(const BrushSnapshot& snapshot) {
+bool MacStateClient::publish(const BrushSnapshot* snapshots, size_t count) {
+    if (snapshots == nullptr || count == 0) return false;
     wifi_ap_record_t ap{};
     if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
         if (debug_) debug_->wifiConnected = false;
         return false;
     }
 
+    const BrushSnapshot& snapshot = snapshots[count - 1];
     cJSON* root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "valid", snapshot.valid);
     cJSON_AddBoolToObject(root, "brushing", snapshot.brushing);
@@ -201,14 +203,17 @@ bool MacStateClient::publish(const BrushSnapshot& snapshot) {
     cJSON_AddNumberToObject(root, "pacer_sector_count", snapshot.pacerSectorCount);
     cJSON_AddNumberToObject(root, "pacer_sector_timer", snapshot.pacerSectorTimer);
     cJSON_AddStringToObject(root, "pressure", pressure_name(snapshot.pressure));
-    if (snapshot.motionPayloadSize > 0) {
-        static const char* hex = "0123456789abcdef";
+    cJSON* motionPayloads = cJSON_AddArrayToObject(root, "motion_payloads_hex");
+    static const char* hex = "0123456789abcdef";
+    for (size_t packet = 0; packet < count; ++packet) {
+        const BrushSnapshot& item = snapshots[packet];
+        if (item.motionPayloadSize == 0) continue;
         char encodedMotion[129]{};
-        for (size_t i = 0; i < snapshot.motionPayloadSize; ++i) {
-            encodedMotion[i * 2] = hex[(snapshot.motionPayload[i] >> 4) & 0x0f];
-            encodedMotion[i * 2 + 1] = hex[snapshot.motionPayload[i] & 0x0f];
+        for (size_t i = 0; i < item.motionPayloadSize; ++i) {
+            encodedMotion[i * 2] = hex[(item.motionPayload[i] >> 4) & 0x0f];
+            encodedMotion[i * 2 + 1] = hex[item.motionPayload[i] & 0x0f];
         }
-        cJSON_AddStringToObject(root, "motion_payload_hex", encodedMotion);
+        cJSON_AddItemToArray(motionPayloads, cJSON_CreateString(encodedMotion));
     }
     char* encoded = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -218,7 +223,7 @@ bool MacStateClient::publish(const BrushSnapshot& snapshot) {
     config.url = app_config::kMacIngestUrl;
     config.method = HTTP_METHOD_POST;
     config.timeout_ms = 500;
-    config.buffer_size = 1024;
+    config.buffer_size = 4096;
     config.keep_alive_enable = false;
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) {
