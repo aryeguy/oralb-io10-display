@@ -110,13 +110,15 @@ bool BrushUi::begin(DebugState* debug) {
     lv_label_set_text(coverageCaption, "coverage");
 
     debugButton_ = lv_btn_create(screen_);
-    lv_obj_set_size(debugButton_, 64, 34);
-    lv_obj_set_pos(debugButton_, 124, 400);
-    lv_obj_set_style_radius(debugButton_, 17, 0);
+    // Keep the labels compact, but give the touch targets a generous size.
+    // The panel is small and a fingertip should not have to land on the text.
+    lv_obj_set_size(debugButton_, 96, 52);
+    lv_obj_set_pos(debugButton_, 102, 388);
+    lv_obj_set_style_radius(debugButton_, 22, 0);
     lv_obj_set_style_bg_color(debugButton_, color_from_hex(0x17344A), 0);
     lv_obj_set_style_border_width(debugButton_, 1, 0);
     lv_obj_set_style_border_color(debugButton_, color_from_hex(0x2A5974), 0);
-    lv_obj_add_event_cb(debugButton_, debugEvent, LV_EVENT_CLICKED, this);
+    lv_obj_add_event_cb(debugButton_, debugEvent, LV_EVENT_PRESSED, this);
     lv_obj_t* debugButtonLabel = lv_label_create(debugButton_);
     lv_obj_center(debugButtonLabel);
     lv_obj_set_style_text_font(debugButtonLabel, &lv_font_montserrat_10, 0);
@@ -124,13 +126,13 @@ bool BrushUi::begin(DebugState* debug) {
     lv_label_set_text(debugButtonLabel, "DEBUG");
 
     resetButton_ = lv_btn_create(screen_);
-    lv_obj_set_size(resetButton_, 64, 34);
-    lv_obj_set_pos(resetButton_, 190, 400);
-    lv_obj_set_style_radius(resetButton_, 17, 0);
+    lv_obj_set_size(resetButton_, 96, 52);
+    lv_obj_set_pos(resetButton_, 210, 388);
+    lv_obj_set_style_radius(resetButton_, 22, 0);
     lv_obj_set_style_bg_color(resetButton_, color_from_hex(0x17344A), 0);
     lv_obj_set_style_border_width(resetButton_, 1, 0);
     lv_obj_set_style_border_color(resetButton_, color_from_hex(0x2A5974), 0);
-    lv_obj_add_event_cb(resetButton_, resetEvent, LV_EVENT_CLICKED, this);
+    lv_obj_add_event_cb(resetButton_, resetEvent, LV_EVENT_PRESSED, this);
     resetButtonLabel_ = lv_label_create(resetButton_);
     lv_obj_center(resetButtonLabel_);
     lv_obj_set_style_text_font(resetButtonLabel_, &lv_font_montserrat_10, 0);
@@ -156,13 +158,13 @@ bool BrushUi::begin(DebugState* debug) {
     lv_label_set_text(debugText_, "TRANSPORT DEBUG\nWaiting for diagnostics...");
 
     debugCloseButton_ = lv_btn_create(debugOverlay_);
-    lv_obj_set_size(debugCloseButton_, 82, 34);
-    lv_obj_set_pos(debugCloseButton_, 250, 376);
-    lv_obj_set_style_radius(debugCloseButton_, 17, 0);
+    lv_obj_set_size(debugCloseButton_, 100, 48);
+    lv_obj_set_pos(debugCloseButton_, 232, 364);
+    lv_obj_set_style_radius(debugCloseButton_, 22, 0);
     lv_obj_set_style_bg_color(debugCloseButton_, color_from_hex(0x17344A), 0);
     lv_obj_set_style_border_width(debugCloseButton_, 1, 0);
     lv_obj_set_style_border_color(debugCloseButton_, color_from_hex(0x2A5974), 0);
-    lv_obj_add_event_cb(debugCloseButton_, debugEvent, LV_EVENT_CLICKED, this);
+    lv_obj_add_event_cb(debugCloseButton_, debugEvent, LV_EVENT_PRESSED, this);
     lv_obj_t* closeLabel = lv_label_create(debugCloseButton_);
     lv_obj_center(closeLabel);
     lv_obj_set_style_text_font(closeLabel, &lv_font_montserrat_10, 0);
