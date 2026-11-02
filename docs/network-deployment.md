@@ -50,8 +50,16 @@ so no client-side IP address or configuration is needed. Use `--host
 
 The ESP32 display is an HTTP client of this same state contract. Configure its
 server address in `firmware/main/app_config.hpp`; the firmware polls
-`/api/state` and uses `/api/reset` for the touchscreen reset action. The
+`/api/state` and uses `/api/reset` for the hardware-button reset action. The
 proprietary model stays on the server and is never placed on the board.
+The same reset can be requested without touch by holding the display board's
+BOOT side button for 0.8 seconds; when a server is configured, the firmware
+forwards that reset to `/api/reset` as well as clearing its local display state.
+
+The backend remains connected when the AMOLED automatically dims after 30
+seconds and goes fully dark after two idle minutes. Starting the brush wakes
+the screen immediately, so no service restart or Bluetooth reconnection is
+needed.
 
 For a headless Pi, run the backend as a systemd service after installing the
 dependencies:

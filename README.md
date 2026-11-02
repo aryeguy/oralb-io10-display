@@ -165,6 +165,23 @@ idf.py -p /dev/cu.usbmodemXXXX flash monitor
 To switch the firmware between mock and passive BLE input, edit
 `firmware/main/app_config.hpp` and change `kUseMockBrush`.
 
+During normal operation, hold the board's **BOOT** side button for 0.8 seconds
+to reset the current brushing session. The press is debounced and fires once
+per hold. The **PWR** button keeps its normal power-management behavior.
+
+To protect the AMOLED from long-lived static pixels, the firmware keeps full
+brightness while brushing, dims after 30 seconds of inactivity, and turns the
+panel brightness to zero after two minutes. Bluetooth, Wi-Fi, and the position
+model remain active; starting the brush or touching the display wakes it.
+
+Surface colors deliberately encode coverage independently of pressure:
+
+- dark blue: not yet brushed;
+- amber through blue to green: partial progress from 1–99%;
+- green: 100% complete;
+- violet: the surface currently being brushed below 100%;
+- gold: the surface currently being brushed after reaching 100%.
+
 ## Protocol references
 
 The passive parser follows the open-source

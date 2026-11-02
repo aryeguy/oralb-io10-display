@@ -52,6 +52,18 @@ class PositionCalibrationTests(unittest.TestCase):
             self.assertEqual(state["stage"], "waiting_for_brush")
             self.assertEqual(state["completed_surfaces"], 0)
 
+    def test_short_brushing_edge_does_not_clear_coverage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine = PositionEngine(Path(directory) / "model.json")
+            engine.coverage[4] = 73.0
+            engine.set_brushing(True)
+            engine.set_brushing(False)
+            engine.set_brushing(True)
+            self.assertEqual(engine.coverage[4], 73.0)
+
+            engine.reset_session()
+            self.assertEqual(engine.coverage, [0.0] * 16)
+
 
 if __name__ == "__main__":
     unittest.main()

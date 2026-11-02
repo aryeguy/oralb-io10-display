@@ -31,4 +31,11 @@ constexpr uint32_t kUiRefreshMs = 500;
 // Display brightness once the BSP has initialized.
 constexpr int kDisplayBrightnessPercent = 80;
 
+// AMOLED protection: retain the completed-session view briefly, then dim and
+// finally turn every pixel off. BLE, Wi-Fi, and classification keep running,
+// so brushing wakes the panel immediately without a reboot or reconnect.
+constexpr int kDisplayDimBrightnessPercent = 20;
+constexpr uint32_t kDisplayDimAfterMs = 30U * 1000U;
+constexpr uint32_t kDisplayOffAfterMs = 2U * 60U * 1000U;
+
 } // namespace app_config

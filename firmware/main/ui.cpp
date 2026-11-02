@@ -1,10 +1,12 @@
 #include "ui.hpp"
 
 #include "app_config.hpp"
+#include "qspi_display.hpp"
 #include "bsp/esp-bsp.h"
 #include "esp_log.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 
 static lv_color_t color_from_hex(uint32_t hex) {
@@ -13,15 +15,106 @@ static lv_color_t color_from_hex(uint32_t hex) {
 
 static const char* TAG = "oralb_ui";
 
+namespace {
+
+constexpr int kMouthCanvasWidth = 368;
+constexpr int kMouthCanvasHeight = 350;
+constexpr int kMouthCanvasY = 88;
+
+struct MouthPoint {
+    int16_t x;
+    int16_t y;
+};
+
+struct MouthCurve {
+    MouthPoint start;
+    MouthPoint control1;
+    MouthPoint control2;
+    MouthPoint end;
+};
+
+// Six symbolic mouth groups, matching the browser preview. Corner groups have
+// three concentric surfaces; the upper/lower middle groups have two. These
+// cubic curves use the simulator's 340x350 coordinate space and are centered
+// in the 368px hardware canvas at draw time.
+constexpr std::array<MouthCurve, kMouthSurfaceCount> kMouthCurves{{
+    {{24, 157}, {24, 101}, {50, 61}, {98, 36}},
+    {{50, 158}, {50, 117}, {70, 87}, {102, 69}},
+    {{76, 159}, {76, 136}, {86, 118}, {104, 105}},
+    {{128, 34}, {156, 23}, {184, 23}, {212, 34}},
+    {{128, 102}, {156, 92}, {184, 92}, {212, 102}},
+    {{236, 105}, {254, 118}, {264, 136}, {264, 159}},
+    {{238, 69}, {270, 87}, {290, 117}, {290, 158}},
+    {{242, 36}, {290, 61}, {316, 101}, {316, 157}},
+    {{24, 193}, {24, 249}, {50, 289}, {98, 314}},
+    {{50, 192}, {50, 233}, {70, 263}, {102, 281}},
+    {{76, 191}, {76, 214}, {86, 232}, {104, 245}},
+    {{128, 316}, {156, 327}, {184, 327}, {212, 316}},
+    {{128, 248}, {156, 258}, {184, 258}, {212, 248}},
+    {{236, 245}, {254, 232}, {264, 214}, {264, 191}},
+    {{238, 281}, {270, 263}, {290, 233}, {290, 192}},
+    {{242, 314}, {290, 289}, {316, 249}, {316, 193}},
+}};
+
+uint32_t mix_hex(uint32_t from, uint32_t to, uint8_t amount) {
+    const uint32_t inv = 255U - amount;
+    const uint32_t r = (((from >> 16) & 0xffU) * inv + ((to >> 16) & 0xffU) * amount) / 255U;
+    const uint32_t g = (((from >> 8) & 0xffU) * inv + ((to >> 8) & 0xffU) * amount) / 255U;
+    const uint32_t b = ((from & 0xffU) * inv + (to & 0xffU) * amount) / 255U;
+    return (r << 16) | (g << 8) | b;
+}
+
+uint32_t coverage_color(uint8_t coverage) {
+    if (coverage == 0) return 0x17394E;
+    if (coverage < 60) {
+        const uint8_t amount = static_cast<uint8_t>((coverage - 1U) * 255U / 58U);
+        return mix_hex(0xE9A23B, 0x3BADD8, amount);
+    }
+    if (coverage < 100) {
+        const uint8_t amount = static_cast<uint8_t>((coverage - 60U) * 255U / 39U);
+        return mix_hex(0x3BADD8, 0x35C890, amount);
+    }
+    return 0x35C890;
+}
+
+template <size_t SampleCount>
+void calculate_curve_points(
+    const MouthCurve& curve,
+    std::array<lv_point_precise_t, SampleCount>& points
+) {
+    constexpr int32_t kXOffset = 14;
+    constexpr int32_t kYOffset = -11;
+
+    for (size_t i = 0; i < points.size(); ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(points.size() - 1);
+        const float u = 1.0f - t;
+        const float a = u * u * u;
+        const float b = 3.0f * u * u * t;
+        const float c = 3.0f * u * t * t;
+        const float d = t * t * t;
+        points[i].x = static_cast<int32_t>(
+            a * curve.start.x + b * curve.control1.x +
+            c * curve.control2.x + d * curve.end.x + kXOffset + 0.5f
+        );
+        points[i].y = static_cast<int32_t>(
+            a * curve.start.y + b * curve.control1.y +
+            c * curve.control2.y + d * curve.end.y + kYOffset + 0.5f
+        );
+    }
+
+}
+
+}  // namespace
+
 bool BrushUi::begin(DebugState* debug) {
     debug_ = debug;
-    lv_display_t* display = bsp_display_start();
+    lv_display_t* display = start_qspi_display();
     if (display == nullptr) {
         return false;
     }
 
     bsp_display_brightness_set(app_config::kDisplayBrightnessPercent);
-    // The BSP enables the panel/backlight as part of bsp_display_start().
+    // start_qspi_display() enables the panel; set its AMOLED brightness here.
 
     if (!bsp_display_lock(1000)) {
         ESP_LOGE(TAG, "Timed out waiting for LVGL display lock");
@@ -30,114 +123,67 @@ bool BrushUi::begin(DebugState* debug) {
     ESP_LOGI(TAG, "Building display UI");
 
     screen_ = lv_screen_active();
+    lv_obj_set_scrollable(screen_, false);
+    lv_display_add_event_cb(display, [](lv_event_t* event) {
+        auto* debug = static_cast<DebugState*>(lv_event_get_user_data(event));
+        if (debug) debug->refreshCount.fetch_add(1, std::memory_order_relaxed);
+    }, LV_EVENT_REFR_READY, debug_);
     lv_obj_set_style_bg_color(screen_, color_from_hex(0x071827), 0);
     lv_obj_set_style_bg_opa(screen_, LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(screen_, color_from_hex(0xF4FAFF), 0);
+    lv_obj_add_event_cb(screen_, wakeEvent, LV_EVENT_PRESSED, this);
 
-    // Mode
-    mode_ = lv_label_create(screen_);
-    lv_obj_set_pos(mode_, 18, 14);
-    lv_obj_set_style_text_font(mode_, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(mode_, color_from_hex(0x8DA9C2), 0);
-    lv_label_set_text(mode_, "DAILY CLEAN");
-
-    // Battery
-    battery_ = lv_label_create(screen_);
-    lv_obj_set_pos(battery_, 300, 14);
-    lv_obj_set_style_text_font(battery_, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(battery_, color_from_hex(0x8DA9C2), 0);
-    lv_label_set_text(battery_, "--");
-
-    // Timer
+    // Only the information that remains readable on a 1.8-inch display:
+    // elapsed time, total coverage, the mouth map, and one pressure glyph.
     timer_ = lv_label_create(screen_);
-    lv_obj_set_width(timer_, 368);
-    lv_obj_set_pos(timer_, 0, 37);
-    lv_obj_set_style_text_align(timer_, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(timer_, 225);
+    lv_obj_set_pos(timer_, 16, 20);
+    lv_obj_set_style_text_align(timer_, LV_TEXT_ALIGN_LEFT, 0);
     lv_obj_set_style_text_font(timer_, &lv_font_montserrat_48, 0);
     lv_label_set_text(timer_, "00:00");
 
-    lv_obj_t* goal = lv_label_create(screen_);
-    lv_obj_set_width(goal, 368);
-    lv_obj_set_pos(goal, 0, 93);
-    lv_obj_set_style_text_align(goal, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(goal, &lv_font_montserrat_10, 0);
-    lv_obj_set_style_text_color(goal, color_from_hex(0x6E8EA9), 0);
-    lv_label_set_text(goal, "BRUSHING GOAL  2:00");
+    coverageLabel_ = lv_label_create(screen_);
+    lv_obj_set_width(coverageLabel_, 92);
+    lv_obj_set_pos(coverageLabel_, 260, 29);
+    lv_obj_set_style_text_align(coverageLabel_, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_font(coverageLabel_, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_color(coverageLabel_, color_from_hex(0xDFF7EE), 0);
+    lv_label_set_text(coverageLabel_, "0%");
+
+    coverageBar_ = lv_obj_create(screen_);
+    lv_obj_set_size(coverageBar_, 80, 7);
+    lv_obj_set_pos(coverageBar_, 274, 68);
+    lv_obj_set_style_radius(coverageBar_, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_width(coverageBar_, 0, 0);
+    lv_obj_set_style_pad_all(coverageBar_, 0, 0);
+    lv_obj_set_style_bg_color(coverageBar_, color_from_hex(0x183142), 0);
+
+    coverageFill_ = lv_obj_create(coverageBar_);
+    lv_obj_set_size(coverageFill_, 0, 7);
+    lv_obj_set_pos(coverageFill_, 0, 0);
+    lv_obj_set_style_radius(coverageFill_, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_width(coverageFill_, 0, 0);
+    lv_obj_set_style_pad_all(coverageFill_, 0, 0);
+    lv_obj_set_style_bg_color(coverageFill_, color_from_hex(0x39DDA0), 0);
 
     buildMouth();
 
-    celebrationLabel_ = lv_label_create(screen_);
-    lv_obj_set_width(celebrationLabel_, 368);
-    lv_obj_set_pos(celebrationLabel_, 0, 112);
-    lv_obj_set_style_text_align(celebrationLabel_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(celebrationLabel_, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(celebrationLabel_, color_from_hex(0xFFD166), 0);
-    lv_obj_set_style_opa(celebrationLabel_, LV_OPA_TRANSP, 0);
-    lv_label_set_text(celebrationLabel_, "");
+    pressureIndicator_ = lv_obj_create(screen_);
+    lv_obj_set_scrollable(pressureIndicator_, false);
+    lv_obj_set_size(pressureIndicator_, 64, 64);
+    lv_obj_set_pos(pressureIndicator_, 152, 220);
+    lv_obj_set_style_radius(pressureIndicator_, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_width(pressureIndicator_, 2, 0);
+    lv_obj_set_style_border_color(pressureIndicator_, color_from_hex(0x28485C), 0);
+    lv_obj_set_style_bg_color(pressureIndicator_, color_from_hex(0x091A26), 0);
+    lv_obj_set_style_pad_all(pressureIndicator_, 0, 0);
+    lv_obj_add_event_cb(pressureIndicator_, debugEvent, LV_EVENT_PRESSED, this);
 
-    // Bottom status and touch control
-    pressureDot_ = lv_obj_create(screen_);
-    lv_obj_set_size(pressureDot_, 18, 18);
-    lv_obj_set_pos(pressureDot_, 18, 405);
-    lv_obj_set_style_radius(pressureDot_, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(pressureDot_, 0, 0);
-    lv_obj_set_style_bg_color(pressureDot_, color_from_hex(0x66788A), 0);
-
-    pressureLabel_ = lv_label_create(screen_);
-    lv_obj_set_pos(pressureLabel_, 44, 399);
-    lv_obj_set_style_text_font(pressureLabel_, &lv_font_montserrat_14, 0);
-    lv_label_set_text(pressureLabel_, "WAITING");
-
-    detailLabel_ = lv_label_create(screen_);
-    lv_obj_set_pos(detailLabel_, 44, 421);
-    lv_obj_set_style_text_font(detailLabel_, &lv_font_montserrat_10, 0);
-    lv_obj_set_style_text_color(detailLabel_, color_from_hex(0x6E8EA9), 0);
-    lv_label_set_text(detailLabel_, "Waiting for Mac server");
-
-    coverageLabel_ = lv_label_create(screen_);
-    lv_obj_set_width(coverageLabel_, 92);
-    lv_obj_set_pos(coverageLabel_, 258, 399);
-    lv_obj_set_style_text_align(coverageLabel_, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_style_text_font(coverageLabel_, &lv_font_montserrat_14, 0);
-    lv_label_set_text(coverageLabel_, "0%");
-
-    lv_obj_t* coverageCaption = lv_label_create(screen_);
-    lv_obj_set_width(coverageCaption, 92);
-    lv_obj_set_pos(coverageCaption, 258, 421);
-    lv_obj_set_style_text_align(coverageCaption, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_style_text_font(coverageCaption, &lv_font_montserrat_10, 0);
-    lv_obj_set_style_text_color(coverageCaption, color_from_hex(0x6E8EA9), 0);
-    lv_label_set_text(coverageCaption, "coverage");
-
-    debugButton_ = lv_btn_create(screen_);
-    // Keep the labels compact, but give the touch targets a generous size.
-    // The panel is small and a fingertip should not have to land on the text.
-    lv_obj_set_size(debugButton_, 96, 52);
-    lv_obj_set_pos(debugButton_, 102, 388);
-    lv_obj_set_style_radius(debugButton_, 22, 0);
-    lv_obj_set_style_bg_color(debugButton_, color_from_hex(0x17344A), 0);
-    lv_obj_set_style_border_width(debugButton_, 1, 0);
-    lv_obj_set_style_border_color(debugButton_, color_from_hex(0x2A5974), 0);
-    lv_obj_add_event_cb(debugButton_, debugEvent, LV_EVENT_PRESSED, this);
-    lv_obj_t* debugButtonLabel = lv_label_create(debugButton_);
-    lv_obj_center(debugButtonLabel);
-    lv_obj_set_style_text_font(debugButtonLabel, &lv_font_montserrat_10, 0);
-    lv_obj_set_style_text_color(debugButtonLabel, color_from_hex(0xB9D6E8), 0);
-    lv_label_set_text(debugButtonLabel, "DEBUG");
-
-    resetButton_ = lv_btn_create(screen_);
-    lv_obj_set_size(resetButton_, 96, 52);
-    lv_obj_set_pos(resetButton_, 210, 388);
-    lv_obj_set_style_radius(resetButton_, 22, 0);
-    lv_obj_set_style_bg_color(resetButton_, color_from_hex(0x17344A), 0);
-    lv_obj_set_style_border_width(resetButton_, 1, 0);
-    lv_obj_set_style_border_color(resetButton_, color_from_hex(0x2A5974), 0);
-    lv_obj_add_event_cb(resetButton_, resetEvent, LV_EVENT_PRESSED, this);
-    resetButtonLabel_ = lv_label_create(resetButton_);
-    lv_obj_center(resetButtonLabel_);
-    lv_obj_set_style_text_font(resetButtonLabel_, &lv_font_montserrat_10, 0);
-    lv_obj_set_style_text_color(resetButtonLabel_, color_from_hex(0xB9D6E8), 0);
-    lv_label_set_text(resetButtonLabel_, "RESET");
+    pressureIcon_ = lv_label_create(pressureIndicator_);
+    lv_obj_set_style_text_font(pressureIcon_, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_color(pressureIcon_, color_from_hex(0x718B9B), 0);
+    lv_label_set_text(pressureIcon_, LV_SYMBOL_MINUS);
+    lv_obj_center(pressureIcon_);
 
     // Full-screen, readable transport diagnostics. The panel is intentionally
     // available on the device itself, so USB serial logs are not required to
@@ -177,125 +223,74 @@ bool BrushUi::begin(DebugState* debug) {
     return true;
 }
 
-void BrushUi::makeCircle(size_t index, int x, int y, int size) {
-    lv_obj_t* o = lv_obj_create(screen_);
-    lv_obj_set_size(o, size, size);
-    lv_obj_set_pos(o, x, y);
-    lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(o, 2, 0);
-    lv_obj_set_style_border_color(o, color_from_hex(0xEEF5FC), 0);
-    lv_obj_set_style_bg_color(o, color_from_hex(0xD9EAFB), 0);
-    lv_obj_set_style_pad_all(o, 0, 0);
-    surfaces_[index] = o;
-}
-
-void BrushUi::makeBar(size_t index, int x, int y, int w, int h) {
-    lv_obj_t* o = lv_obj_create(screen_);
-    lv_obj_set_size(o, w, h);
-    lv_obj_set_pos(o, x, y);
-    lv_obj_set_style_radius(o, 12, 0);
-    lv_obj_set_style_border_width(o, 2, 0);
-    lv_obj_set_style_border_color(o, color_from_hex(0xEEF5FC), 0);
-    lv_obj_set_style_bg_color(o, color_from_hex(0xD9EAFB), 0);
-    lv_obj_set_style_pad_all(o, 0, 0);
-    surfaces_[index] = o;
-}
-
 void BrushUi::buildMouth() {
-    // The goal here is structural similarity to the Oral-B coverage screen,
-    // not final visual polish. These positions deliberately mirror the
-    // browser simulator so later UI iterations remain easy to port.
+    // Persistent line objects avoid clearing a 368x350 canvas on every
+    // classifier update. LVGL can redraw the curves and overlaid pressure
+    // indicator together; actual panel behavior is checked on the device.
+    mouthLayer_ = lv_obj_create(screen_);
+    lv_obj_set_size(mouthLayer_, kMouthCanvasWidth, kMouthCanvasHeight);
+    lv_obj_set_pos(mouthLayer_, 0, kMouthCanvasY);
+    lv_obj_set_style_bg_opa(mouthLayer_, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(mouthLayer_, 0, 0);
+    lv_obj_set_style_pad_all(mouthLayer_, 0, 0);
+    lv_obj_remove_flag(mouthLayer_, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Upper-left corner: outside / chewing / inside
-    makeCircle(0, 25, 145, 50);
-    makeCircle(1, 36, 179, 44);
-    makeCircle(2, 48, 209, 38);
+    for (size_t i = 0; i < kMouthSurfaceCount; ++i) {
+        calculate_curve_points(kMouthCurves[i], mouthPoints_[i]);
 
-    // Upper-center: outside / inside
-    makeBar(3, 99, 135, 170, 38);
-    makeBar(4, 116, 181, 136, 30);
+        mouthOutlines_[i] = lv_line_create(mouthLayer_);
+        lv_obj_set_size(mouthOutlines_[i], kMouthCanvasWidth, kMouthCanvasHeight);
+        lv_obj_set_pos(mouthOutlines_[i], 0, 0);
+        lv_line_set_points(
+            mouthOutlines_[i], mouthPoints_[i].data(), mouthPoints_[i].size()
+        );
+        lv_obj_set_style_line_color(mouthOutlines_[i], color_from_hex(0x0A2332), 0);
+        lv_obj_set_style_line_width(mouthOutlines_[i], 19, 0);
+        lv_obj_set_style_line_rounded(mouthOutlines_[i], true, 0);
 
-    // Upper-right corner: inside / chewing / outside
-    makeCircle(5, 282, 209, 38);
-    makeCircle(6, 288, 179, 44);
-    makeCircle(7, 293, 145, 50);
-
-    // Lower-left corner: outside / chewing / inside
-    makeCircle(8, 25, 303, 50);
-    makeCircle(9, 36, 274, 44);
-    makeCircle(10, 48, 244, 38);
-
-    // Lower-center: outside / inside
-    makeBar(11, 99, 312, 170, 38);
-    makeBar(12, 116, 274, 136, 30);
-
-    // Lower-right corner: inside / chewing / outside
-    makeCircle(13, 282, 244, 38);
-    makeCircle(14, 288, 274, 44);
-    makeCircle(15, 293, 303, 50);
-
-    lv_obj_t* outside = lv_label_create(screen_);
-    lv_obj_set_width(outside, 120);
-    lv_obj_set_pos(outside, 124, 214);
-    lv_obj_set_style_text_align(outside, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(outside, &lv_font_montserrat_10, 0);
-    lv_obj_set_style_text_color(outside, color_from_hex(0x6E8EA9), 0);
-    lv_label_set_text(outside, "Outside");
-
-    lv_obj_t* chewing = lv_label_create(screen_);
-    lv_obj_set_width(chewing, 120);
-    lv_obj_set_pos(chewing, 124, 238);
-    lv_obj_set_style_text_align(chewing, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(chewing, &lv_font_montserrat_10, 0);
-    lv_obj_set_style_text_color(chewing, color_from_hex(0x6E8EA9), 0);
-    lv_label_set_text(chewing, "Chewing");
-
-    lv_obj_t* inside = lv_label_create(screen_);
-    lv_obj_set_width(inside, 120);
-    lv_obj_set_pos(inside, 124, 262);
-    lv_obj_set_style_text_align(inside, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(inside, &lv_font_montserrat_10, 0);
-    lv_obj_set_style_text_color(inside, color_from_hex(0x6E8EA9), 0);
-    lv_label_set_text(inside, "Inside");
-}
-
-void BrushUi::styleSurface(lv_obj_t* obj, uint8_t coverage, bool active) {
-    if (obj == nullptr) return;
-
-    uint32_t fill = 0x123248;
-    if (coverage >= 95) {
-        fill = 0x1DBA9A;
-    } else if (coverage > 0) {
-        fill = 0x1681A4;
-    }
-
-    lv_obj_set_style_bg_color(obj, color_from_hex(fill), 0);
-
-    if (active) {
-        lv_obj_set_style_border_color(obj, color_from_hex(0xFFD166), 0);
-        lv_obj_set_style_border_width(obj, 4, 0);
-    } else {
-        lv_obj_set_style_border_color(obj, color_from_hex(0x2A5974), 0);
-        lv_obj_set_style_border_width(obj, 2, 0);
+        mouthSegments_[i] = lv_line_create(mouthLayer_);
+        lv_obj_set_size(mouthSegments_[i], kMouthCanvasWidth, kMouthCanvasHeight);
+        lv_obj_set_pos(mouthSegments_[i], 0, 0);
+        lv_line_set_points(
+            mouthSegments_[i], mouthPoints_[i].data(), mouthPoints_[i].size()
+        );
+        lv_obj_set_style_line_color(
+            mouthSegments_[i], color_from_hex(coverage_color(0)), 0
+        );
+        lv_obj_set_style_line_width(mouthSegments_[i], 15, 0);
+        lv_obj_set_style_line_rounded(mouthSegments_[i], true, 0);
     }
 }
 
-void BrushUi::borderAnimation(void* object, int32_t value) {
-    lv_obj_set_style_border_width(static_cast<lv_obj_t*>(object), value, 0);
-}
+void BrushUi::drawMouth(const BrushState& state, uint32_t pressureColor) {
+    if (mouthLayer_ == nullptr) return;
 
-void BrushUi::celebrationAnimation(void* object, int32_t value) {
-    lv_obj_set_style_opa(static_cast<lv_obj_t*>(object), static_cast<lv_opa_t>(value), 0);
-}
-
-void BrushUi::resetEvent(lv_event_t* event) {
-    auto* ui = static_cast<BrushUi*>(lv_event_get_user_data(event));
-    if (ui != nullptr) ui->resetRequested_ = true;
+    for (size_t i = 0; i < kMouthSurfaceCount; ++i) {
+        uint32_t fill = coverage_color(state.coverage[i]);
+        int32_t width = 15;
+        if (state.brushing && state.activeSurface == static_cast<int8_t>(i)) {
+            fill = state.coverage[i] >= 100 ? 0xFFD166 : pressureColor;
+            width = 18;
+        }
+        lv_obj_set_style_line_width(mouthOutlines_[i], width + 4, 0);
+        lv_obj_set_style_line_color(mouthSegments_[i], color_from_hex(fill), 0);
+        lv_obj_set_style_line_width(mouthSegments_[i], width, 0);
+    }
 }
 
 void BrushUi::debugEvent(lv_event_t* event) {
     auto* ui = static_cast<BrushUi*>(lv_event_get_user_data(event));
-    if (ui != nullptr) ui->toggleDebug();
+    if (ui == nullptr) return;
+    if (!ui->displayAwake_.load()) {
+        ui->wakeRequested_.store(true);
+        return;
+    }
+    ui->toggleDebug();
+}
+
+void BrushUi::wakeEvent(lv_event_t* event) {
+    auto* ui = static_cast<BrushUi*>(lv_event_get_user_data(event));
+    if (ui != nullptr) ui->wakeRequested_.store(true);
 }
 
 void BrushUi::toggleDebug() {
@@ -364,52 +359,48 @@ void BrushUi::renderDebug() {
     lv_label_set_text(debugText_, text);
 }
 
-void BrushUi::pulseSurface(size_t index) {
-    if (index >= surfaces_.size() || surfaces_[index] == nullptr) return;
-    lv_anim_t animation;
-    lv_anim_init(&animation);
-    lv_anim_set_var(&animation, surfaces_[index]);
-    lv_anim_set_values(&animation, 2, 7);
-    lv_anim_set_duration(&animation, 220);
-    lv_anim_set_playback_duration(&animation, 220);
-    lv_anim_set_repeat_count(&animation, 1);
-    lv_anim_set_exec_cb(&animation, borderAnimation);
-    lv_anim_start(&animation);
-}
-
-void BrushUi::showCelebration(const char* text) {
-    if (celebrationLabel_ == nullptr) return;
-    lv_label_set_text(celebrationLabel_, text);
-    lv_obj_set_style_opa(celebrationLabel_, LV_OPA_COVER, 0);
-    lv_anim_t animation;
-    lv_anim_init(&animation);
-    lv_anim_set_var(&animation, celebrationLabel_);
-    lv_anim_set_values(&animation, LV_OPA_COVER, LV_OPA_TRANSP);
-    lv_anim_set_duration(&animation, 1500);
-    lv_anim_set_exec_cb(&animation, celebrationAnimation);
-    lv_anim_start(&animation);
-}
-
-bool BrushUi::consumeResetRequest() {
-    const bool requested = resetRequested_;
-    resetRequested_ = false;
-    return requested;
-}
-
 void BrushUi::resetVisualState() {
-    previousCoverage_.fill(0);
-    previousAllComplete_ = false;
-    hasRendered_ = false;
+    mouthRendered_ = false;
+    wakeRequested_.store(true);
 }
 
-void BrushUi::render(const BrushState& state) {
+void BrushUi::setDisplayBrightness(int brightnessPercent) {
+    if (brightnessPercent == currentBrightness_) return;
+    if (bsp_display_brightness_set(brightnessPercent) == ESP_OK) {
+        currentBrightness_ = brightnessPercent;
+        if (debug_) debug_->displayBrightness = brightnessPercent;
+        displayAwake_.store(brightnessPercent > 0);
+        ESP_LOGI(TAG, "Display brightness %d%%", brightnessPercent);
+    }
+}
+
+void BrushUi::updateDisplayPower(const BrushState& state, uint32_t nowMs) {
+    if (lastDisplayActivityMs_ == 0) lastDisplayActivityMs_ = nowMs;
+
+    const bool requested = wakeRequested_.exchange(false);
+    if (state.brushing || requested) lastDisplayActivityMs_ = nowMs;
+
+    const uint32_t idleMs = nowMs - lastDisplayActivityMs_;
+    if (state.brushing || idleMs < app_config::kDisplayDimAfterMs) {
+        setDisplayBrightness(app_config::kDisplayBrightnessPercent);
+    } else if (idleMs < app_config::kDisplayOffAfterMs) {
+        setDisplayBrightness(app_config::kDisplayDimBrightnessPercent);
+    } else {
+        setDisplayBrightness(0);
+    }
+}
+
+void BrushUi::render(const BrushState& state, uint32_t nowMs) {
     if (screen_ == nullptr) {
         return;
     }
 
     if (!bsp_display_lock(1000)) {
+        if (debug_) debug_->renderLockFailures++;
         return;
     }
+
+    updateDisplayPower(state, nowMs);
 
     char buf[48];
 
@@ -421,89 +412,90 @@ void BrushUi::render(const BrushState& state) {
         static_cast<unsigned long>(state.elapsedSeconds % 60)
     );
     lv_label_set_text(timer_, buf);
-    lv_label_set_text(mode_, state.modeName);
 
-    if (state.batteryPercent >= 0) {
-        std::snprintf(buf, sizeof(buf), "%d%%", state.batteryPercent);
-        lv_label_set_text(battery_, buf);
-    } else {
-        lv_label_set_text(battery_, "--");
-    }
+    uint32_t pressureColor = 0x718B9B;
+    uint32_t pressureBackground = 0x091A26;
+    uint32_t pressureBorder = 0x28485C;
+    const char* pressureIcon = LV_SYMBOL_MINUS;
 
-    uint32_t pressureColor = 0x9CA3AF;
-    const char* pressureText = "WAITING";
-
-    switch (state.pressure) {
-        case Pressure::Low:
-            pressureColor = 0x60A5FA;
-            pressureText = "LOW PRESSURE";
-            break;
-        case Pressure::Normal:
-            pressureColor = 0x4ADE80;
-            pressureText = "GOOD PRESSURE";
-            break;
-        case Pressure::High:
-            pressureColor = 0xF87171;
-            pressureText = "HIGH PRESSURE";
-            break;
-        default:
-            break;
-    }
-
-    lv_obj_set_style_bg_color(pressureDot_, color_from_hex(pressureColor), 0);
-    lv_label_set_text(pressureLabel_, pressureText);
-
-    if (!state.seen) {
-        lv_label_set_text(detailLabel_, "Looking for toothbrush");
-    } else if (!state.brushing) {
-        lv_label_set_text(detailLabel_, "Brush idle");
-    } else {
-        std::snprintf(
-            buf,
-            sizeof(buf),
-            "Pacer %u of %u",
-            state.pacerSector,
-            state.pacerSectorCount
-        );
-        lv_label_set_text(detailLabel_, buf);
+    if (state.brushing) {
+        switch (state.pressure) {
+            case Pressure::Low:
+                pressureColor = 0xE8F4FF;
+                pressureBackground = 0x287AC2;
+                pressureBorder = 0x74B8FF;
+                pressureIcon = LV_SYMBOL_UP;
+                break;
+            case Pressure::Normal:
+                pressureColor = 0xEAFFF7;
+                pressureBackground = 0x15996A;
+                pressureBorder = 0x7AEBBF;
+                pressureIcon = LV_SYMBOL_OK;
+                break;
+            case Pressure::High:
+                pressureColor = 0xFFF0F1;
+                pressureBackground = 0xD94859;
+                pressureBorder = 0xFF929C;
+                pressureIcon = LV_SYMBOL_DOWN;
+                break;
+            default:
+                pressureIcon = "?";
+                break;
+        }
     }
 
     uint32_t total = 0;
     bool allComplete = true;
     for (size_t i = 0; i < kMouthSurfaceCount; ++i) {
-        if (state.coverage[i] < 95) allComplete = false;
-        if (hasRendered_ && previousCoverage_[i] < 95 && state.coverage[i] >= 95) {
-            pulseSurface(i);
-        }
+        if (state.coverage[i] < 100) allComplete = false;
         total += state.coverage[i];
-        styleSurface(
-            surfaces_[i],
-            state.coverage[i],
-            state.activeSurface == static_cast<int8_t>(i)
-        );
     }
 
-    if (hasRendered_ && allComplete && !previousAllComplete_) {
-        showCelebration("ALL SECTIONS COMPLETE");
-    } else if (hasRendered_) {
-        for (size_t i = 0; i < kMouthSurfaceCount; ++i) {
-            if (previousCoverage_[i] < 95 && state.coverage[i] >= 95) {
-                showCelebration("SECTION COMPLETE");
-                break;
-            }
-        }
+    if (allComplete) {
+        pressureColor = 0xEAFFF7;
+        pressureBackground = 0x15996A;
+        pressureBorder = 0x8DF0C8;
+        pressureIcon = LV_SYMBOL_OK;
     }
-    previousCoverage_ = state.coverage;
-    previousAllComplete_ = allComplete;
-    hasRendered_ = true;
+
+    lv_obj_set_style_text_color(pressureIcon_, color_from_hex(pressureColor), 0);
+    lv_label_set_text(pressureIcon_, pressureIcon);
+    lv_obj_set_style_bg_color(pressureIndicator_, color_from_hex(pressureBackground), 0);
+    lv_obj_set_style_border_color(pressureIndicator_, color_from_hex(pressureBorder), 0);
+
+    // Pressure belongs to the center indicator. Active coverage is violet,
+    // or gold when brushing an area that is already complete.
+    uint32_t activeColor = 0x8B5CF6;
+    const bool mouthChanged =
+        !mouthRendered_ ||
+        renderedBrushing_ != state.brushing ||
+        renderedActiveSurface_ != state.activeSurface ||
+        renderedActiveColor_ != activeColor ||
+        renderedCoverage_ != state.coverage;
+    if (mouthChanged) {
+        drawMouth(state, activeColor);
+        mouthRendered_ = true;
+        renderedBrushing_ = state.brushing;
+        renderedActiveSurface_ = state.activeSurface;
+        renderedActiveColor_ = activeColor;
+        renderedCoverage_ = state.coverage;
+    }
 
     const uint32_t avg =
         total / static_cast<uint32_t>(kMouthSurfaceCount);
 
     std::snprintf(buf, sizeof(buf), "%lu%%", static_cast<unsigned long>(avg));
     lv_label_set_text(coverageLabel_, buf);
+    lv_obj_set_width(coverageFill_, static_cast<int32_t>(avg * 80U / 100U));
 
     if (debugVisible_) renderDebug();
+
+    if (debug_) {
+        debug_->renderedAtMs = nowMs;
+        debug_->renderCount++;
+        debug_->renderedBrushing = state.brushing;
+        debug_->renderedElapsed = state.elapsedSeconds;
+    }
 
     bsp_display_unlock();
 }

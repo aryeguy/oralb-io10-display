@@ -51,6 +51,15 @@ READ_NAMES = (
     "pacer_config",
 )
 
+# FF0D normally arrives many times per second, but the brush periodically
+# drops its GATT connection and reconnecting can take well over six seconds.
+# An explicit idle advertisement may end a session after the short grace
+# below. Silence alone is transport loss, not proof that brushing stopped, so
+# it uses the much longer fail-safe. The hardware button can reset immediately.
+MOTION_STOP_GRACE_SECONDS = 6.0
+TRANSPORT_LOSS_FAILSAFE_SECONDS = 60.0
+NEW_SESSION_IDLE_SECONDS = 60.0
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
@@ -124,6 +133,7 @@ class OralBBridge:
         self._mock_elapsed = 0.0
         self._mock_started_at = 0.0
         self._mock_running = False
+        self.display_diagnostics: dict[str, Any] = {}
 
     async def start(self) -> None:
         self._loop = asyncio.get_running_loop()
@@ -160,21 +170,105 @@ class OralBBridge:
     async def _ticker(self) -> None:
         while True:
             await asyncio.sleep(1)
-            if (
-                self.brush.get("brushing")
-                and self._last_motion_at is not None
-                and time.monotonic() - self._last_motion_at > 1.5
-            ):
-                if self._timer_anchor is not None:
-                    anchor, observed = self._timer_anchor
-                    self.brush["elapsed_seconds"] = anchor + int(
-                        time.monotonic() - observed
-                    )
-                self.brush["brushing"] = False
-                self._timer_anchor = None
-                self.position_engine.set_brushing(False)
-                self.brush["position"] = self.position_engine.position_state()
+            self._advance_session_timeout(time.monotonic())
             self.schedule_publish(0)
+
+    def _effective_elapsed(self, now: float) -> int:
+        """Return the monotonic session timer without mutating public state."""
+        elapsed = int(self.brush.get("elapsed_seconds") or 0)
+        if self.brush.get("brushing") and self._timer_anchor is not None:
+            anchor, observed = self._timer_anchor
+            elapsed = max(elapsed, anchor + max(0, int(now - observed)))
+        return elapsed
+
+    def _advance_session_timeout(self, now: float) -> None:
+        """End a relay session only after a genuine transport-loss fail-safe.
+
+        Normal iO GATT reconnects are deliberately invisible to the display:
+        the pressure indicator, active area, and timer remain stable. Explicit
+        idle packets are handled separately by ``_normalize_relay_session``.
+        """
+        if (
+            not self.brush.get("brushing")
+            or self._last_motion_at is None
+            or now - self._last_motion_at < TRANSPORT_LOSS_FAILSAFE_SECONDS
+        ):
+            return
+
+        self.brush["elapsed_seconds"] = self._effective_elapsed(now)
+        self.brush["brushing"] = False
+        self._timer_anchor = None
+        self.position_engine.set_brushing(False)
+        self.brush["position"] = self.position_engine.position_state()
+
+    def _normalize_relay_session(
+        self,
+        values: dict[str, Any],
+        *,
+        has_motion: bool,
+        now: float,
+    ) -> None:
+        """Make the ESP32 relay's noisy packet stream session-safe.
+
+        The cached advertisement can continue to report idle/00:00 while the
+        connected FF0D motion stream is active. Never let that stale value
+        rewind a running or recently paused session.
+        """
+        previous_motion_at = self._last_motion_at
+        current_elapsed = self._effective_elapsed(now)
+        incoming_elapsed = values.get("elapsed_seconds")
+        motion_gap = (
+            None if previous_motion_at is None else max(0.0, now - previous_motion_at)
+        )
+
+        if has_motion:
+            new_session = (
+                previous_motion_at is None
+                or (
+                    motion_gap is not None
+                    and motion_gap >= NEW_SESSION_IDLE_SECONDS
+                )
+            )
+            if new_session:
+                self.position_engine.reset_session()
+
+            self._last_motion_at = now
+            values["brushing"] = True
+
+            if (
+                not new_session
+                and isinstance(incoming_elapsed, (int, float))
+                and int(incoming_elapsed) <= current_elapsed
+            ):
+                if self.brush.get("brushing"):
+                    # Keep the existing running timer anchor.
+                    values.pop("elapsed_seconds", None)
+                else:
+                    # Resume a short pause from the retained timer value.
+                    values["elapsed_seconds"] = current_elapsed
+            return
+
+        if values.get("brushing") is not False or previous_motion_at is None:
+            return
+
+        if motion_gap is not None and motion_gap <= MOTION_STOP_GRACE_SECONDS:
+            values["brushing"] = True
+        else:
+            # Freeze the locally-smoothed timer at the moment a credible idle
+            # packet ends the session. Never allow the cached 00:00 value to
+            # make the display jump backwards.
+            values["elapsed_seconds"] = current_elapsed
+
+        # Idle advertisements say 00:00 even when they are merely interleaved
+        # with GATT traffic. Retain the session time until a new session is
+        # positively identified by a long motion gap.
+        if (
+            values.get("brushing") is not False
+            and
+            isinstance(incoming_elapsed, (int, float))
+            and int(incoming_elapsed) <= current_elapsed
+        ):
+            values.pop("elapsed_seconds", None)
 
     def _on_detection(self, device: Any, advertisement: Any) -> None:
         manufacturer = advertisement.manufacturer_data.get(ORALB_COMPANY_ID)
@@ -561,7 +655,13 @@ class OralBBridge:
         duration = 120 / 16
         active = min(16, int(elapsed / duration) + 1)
         coverage = [max(0.0, min(100.0, (elapsed - i * duration) / duration * 100)) for i in range(16)]
-        pressure = "high" if self._mock_running and int(elapsed) % 29 in range(22, 26) else "normal"
+        pressure_phase = int(elapsed) % 30
+        if self._mock_running and pressure_phase in range(8, 11):
+            pressure = "low"
+        elif self._mock_running and pressure_phase in range(20, 24):
+            pressure = "high"
+        else:
+            pressure = "normal"
         self.brush.update(
             {
                 "valid": True,
@@ -573,7 +673,7 @@ class OralBBridge:
                 "brushing": self._mock_running,
                 "elapsed_seconds": int(elapsed),
                 "pressure": pressure,
-                "pressure_raw": 2 if pressure == "high" else 1,
+                "pressure_raw": {"low": 0, "normal": 1, "high": 2}[pressure],
                 "mode": "daily_clean",
                 "mode_raw": 0,
                 "battery": 87,
@@ -614,6 +714,7 @@ class OralBBridge:
             "devices": sorted(self.devices.values(), key=lambda item: item["last_seen"], reverse=True),
             "events": list(self._events)[-30:],
             "server_time": utc_now(),
+            "display_diagnostics": copy.deepcopy(self.display_diagnostics),
         }
 
     async def start_calibration(self) -> None:
@@ -675,6 +776,17 @@ def create_app(bridge: OralBBridge, open_browser: bool = False, port: int = 8765
 
     async def display_state(request: web.Request) -> web.Response:
         """Small state contract for constrained LAN display clients."""
+        diagnostics = {}
+        for key in ("uptime_ms", "render_count", "render_age_ms", "brightness",
+                    "render_brushing", "render_elapsed", "lock_failures",
+                    "stack_free", "motion_packets", "gatt", "refresh_count"):
+            try:
+                diagnostics[key] = int(request.query[key])
+            except (KeyError, ValueError):
+                pass
+        if diagnostics:
+            diagnostics["received_at"] = utc_now()
+            request.app["bridge"].display_diagnostics = diagnostics
         public = request.app["bridge"].public_state()
         brush = public["brush"]
         compact_brush = {
@@ -726,27 +838,11 @@ def create_app(bridge: OralBBridge, open_browser: bool = False, port: int = 8765
         now = time.monotonic()
         if decoded_packets:
             values.update(decoded_packets[-1])
-        if motion_samples:
-            # FF0D is authoritative while it is flowing. The iO10 can leave
-            # its advertisement state at idle/menu throughout a real session.
-            active._last_motion_at = now
-            values["brushing"] = True
-            if (
-                active.brush.get("brushing")
-                and int(values.get("elapsed_seconds") or 0) == 0
-            ):
-                # The ESP32's cached advertisement often remains at 00:00
-                # after the GATT connection stops scanning. Keep the server's
-                # running timer anchor instead of resetting it every batch.
-                values.pop("elapsed_seconds", None)
-        elif (
-            values.get("brushing") is False
-            and active._last_motion_at is not None
-            and now - active._last_motion_at <= 1.5
-        ):
-            # Do not let an interleaved idle advertisement reset the RNN in
-            # the middle of a continuous motion stream.
-            values["brushing"] = True
+        active._normalize_relay_session(
+            values,
+            has_motion=bool(motion_samples),
+            now=now,
+        )
         values["source"] = "esp32_ble"
         active._apply_update(values, source="esp32_ble", name="ESP32 BLE relay", device_id="esp32")
         if decoded_packets:

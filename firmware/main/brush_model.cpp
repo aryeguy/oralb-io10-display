@@ -2,7 +2,8 @@
 
 #include <algorithm>
 
-BrushModel::BrushModel() {
+BrushModel::BrushModel(bool serverAuthoritative)
+    : serverAuthoritative_(serverAuthoritative) {
     reset();
 }
 
@@ -30,7 +31,7 @@ static const char* mode_name(uint8_t mode) {
 }
 
 void BrushModel::apply(const BrushSnapshot& s) {
-    if (!s.valid) {
+    if (!s.valid || (serverAuthoritative_ && !s.serverState)) {
         return;
     }
 

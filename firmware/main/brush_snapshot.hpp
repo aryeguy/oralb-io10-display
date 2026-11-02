@@ -6,6 +6,7 @@
 #include <cstddef>
 
 struct BrushSnapshot {
+    bool serverState = false;
     bool valid = false;
     bool brushing = false;
     uint32_t elapsedSeconds = 0;

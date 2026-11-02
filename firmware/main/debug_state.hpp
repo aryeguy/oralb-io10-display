@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <atomic>
 
 // Transport diagnostics shown on the ESP32 display. These fields describe
 // whether each link is alive, independently of classifier confidence.
@@ -25,6 +26,14 @@ struct DebugState {
     int lastHttpStatus = 0;
     uint32_t lastAdvertisementMs = 0;
     uint32_t lastMotionMs = 0;
+    uint32_t renderedAtMs = 0;
+    uint32_t renderCount = 0;
+    uint32_t renderLockFailures = 0;
+    std::atomic<uint32_t> refreshCount{0};
+    uint32_t stackFreeBytes = 0;
+    uint32_t renderedElapsed = 0;
+    bool renderedBrushing = false;
+    int displayBrightness = -1;
     char ipAddress[16] = "--";
     char classifierStatus[20] = "--";
 };

@@ -6,49 +6,50 @@
 #include "lvgl.h"
 
 #include <array>
+#include <atomic>
 
 class BrushUi {
 public:
     bool begin(DebugState* debug = nullptr);
-    void render(const BrushState& state);
-    bool consumeResetRequest();
+    void render(const BrushState& state, uint32_t nowMs);
     void resetVisualState();
 
 private:
     lv_obj_t* screen_ = nullptr;
     lv_obj_t* timer_ = nullptr;
-    lv_obj_t* mode_ = nullptr;
-    lv_obj_t* battery_ = nullptr;
-    lv_obj_t* pressureDot_ = nullptr;
-    lv_obj_t* pressureLabel_ = nullptr;
-    lv_obj_t* detailLabel_ = nullptr;
     lv_obj_t* coverageLabel_ = nullptr;
-    lv_obj_t* celebrationLabel_ = nullptr;
-    lv_obj_t* resetButton_ = nullptr;
-    lv_obj_t* resetButtonLabel_ = nullptr;
-    lv_obj_t* debugButton_ = nullptr;
+    lv_obj_t* coverageBar_ = nullptr;
+    lv_obj_t* coverageFill_ = nullptr;
+    lv_obj_t* mouthLayer_ = nullptr;
+    static constexpr size_t kMouthCurveSamples = 13;
+    std::array<std::array<lv_point_precise_t, kMouthCurveSamples>, kMouthSurfaceCount>
+        mouthPoints_{};
+    std::array<lv_obj_t*, kMouthSurfaceCount> mouthOutlines_{};
+    std::array<lv_obj_t*, kMouthSurfaceCount> mouthSegments_{};
+    lv_obj_t* pressureIndicator_ = nullptr;
+    lv_obj_t* pressureIcon_ = nullptr;
     lv_obj_t* debugOverlay_ = nullptr;
     lv_obj_t* debugText_ = nullptr;
     lv_obj_t* debugCloseButton_ = nullptr;
     DebugState* debug_ = nullptr;
 
-    std::array<lv_obj_t*, kMouthSurfaceCount> surfaces_{};
-    std::array<uint8_t, kMouthSurfaceCount> previousCoverage_{};
-    bool hasRendered_ = false;
-    bool previousAllComplete_ = false;
-    bool resetRequested_ = false;
     bool debugVisible_ = false;
+    std::atomic<bool> displayAwake_{true};
+    std::atomic<bool> wakeRequested_{false};
+    int currentBrightness_ = -1;
+    uint32_t lastDisplayActivityMs_ = 0;
+    bool mouthRendered_ = false;
+    bool renderedBrushing_ = false;
+    int8_t renderedActiveSurface_ = -2;
+    uint32_t renderedActiveColor_ = 0;
+    std::array<uint8_t, kMouthSurfaceCount> renderedCoverage_{};
 
     void buildMouth();
-    void makeCircle(size_t index, int x, int y, int size);
-    void makeBar(size_t index, int x, int y, int w, int h);
-    void styleSurface(lv_obj_t* obj, uint8_t coverage, bool active);
-    void pulseSurface(size_t index);
-    void showCelebration(const char* text);
-    static void borderAnimation(void* object, int32_t value);
-    static void celebrationAnimation(void* object, int32_t value);
-    static void resetEvent(lv_event_t* event);
+    void drawMouth(const BrushState& state, uint32_t pressureColor);
+    void updateDisplayPower(const BrushState& state, uint32_t nowMs);
+    void setDisplayBrightness(int brightnessPercent);
     static void debugEvent(lv_event_t* event);
+    static void wakeEvent(lv_event_t* event);
     void toggleDebug();
     void renderDebug();
 };

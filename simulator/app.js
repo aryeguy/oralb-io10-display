@@ -8,9 +8,9 @@
   let toastTimer = null;
 
   const pressureDisplay = {
-    low: ['LOW PRESSURE', 'Low', '#61aef4'],
-    normal: ['GOOD PRESSURE', 'Normal', '#3ee49a'],
-    high: ['TOO MUCH PRESSURE', 'High', '#ff6b79'],
+    low: ['LOW PRESSURE', 'Low', '#54a8ff', 'Press a little more', '↑'],
+    normal: ['GOOD PRESSURE', 'Normal', '#39dda0', 'Keep this pressure', '✓'],
+    high: ['TOO MUCH PRESSURE', 'High', '#ff6574', 'Ease off slightly', '↓'],
   };
 
   function titleCase(value) {
@@ -23,6 +23,22 @@
     const minutes = Math.floor(value / 60);
     const seconds = Math.floor(value % 60);
     return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  function mixColor(from, to, amount) {
+    const parse = (value) => [1, 3, 5].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16));
+    const a = parse(from);
+    const b = parse(to);
+    const value = Math.max(0, Math.min(1, amount));
+    return `#${a.map((channel, index) => Math.round(channel + (b[index] - channel) * value).toString(16).padStart(2, '0')).join('')}`;
+  }
+
+  function coverageColor(value) {
+    const coverage = Math.max(0, Math.min(100, Number(value) || 0));
+    if (coverage === 0) return '#17394e';
+    if (coverage < 60) return mixColor('#e9a23b', '#3badd8', (coverage - 1) / 58);
+    if (coverage < 100) return mixColor('#3badd8', '#35c890', (coverage - 60) / 39);
+    return '#35c890';
   }
 
   function showToast(message) {
@@ -59,56 +75,51 @@
     const position = brush.position || {};
     const calibration = state.calibration || {};
     const coverage = Array.isArray(position.coverage) ? position.coverage : Array(16).fill(0);
-    const pressure = pressureDisplay[brush.pressure] || [`${titleCase(brush.pressure)} PRESSURE`, titleCase(brush.pressure), '#9badbd'];
+    const rawPressure = String(brush.pressure || 'normal').toLowerCase();
+    const pressureKey = rawPressure === 'good' ? 'normal' : rawPressure;
+    const pressure = pressureDisplay[pressureKey] || [`${titleCase(brush.pressure)} PRESSURE`, titleCase(brush.pressure), '#8da8ba', 'Waiting for pressure data', '•'];
     const connected = connection.status === 'connected';
     const demo = state.mode === 'mock';
+    const display = $('#displayScreen');
+    const isBrushing = Boolean(brush.brushing);
+    const average = coverage.reduce((sum, value) => sum + Number(value || 0), 0) / 16;
+    const completedCount = coverage.filter((value) => Number(value) >= 100).length;
+    const allComplete = completedCount === 16;
 
-    $('#modeName').textContent = titleCase(brush.mode || 'daily_clean').toUpperCase();
     $('#timer').textContent = formatTime(brush.elapsed_seconds);
-    $('#goalValue').textContent = formatTime(brush.target_seconds || 120);
-    $('#batteryValue').textContent = Number.isFinite(brush.battery) ? `${brush.battery}%` : '—';
-    $('#pressureText').textContent = pressure[0];
-    $('#pressureDot').style.background = pressure[2];
-    $('#pressureDot').style.boxShadow = `0 0 0 4px ${pressure[2]}1f`;
+    display.style.setProperty('--active-color', pressure[2]);
+    display.style.setProperty('--active-soft', `${pressure[2]}33`);
+    display.classList.toggle('brushing', isBrushing);
+    display.classList.toggle('session-complete', allComplete);
+    $('#overallProgress').style.width = `${Math.max(0, Math.min(100, average))}%`;
+    $('#coverageValue').textContent = `${Math.round(average)}%`;
+
+    const pressureIndicator = $('#pressureIndicator');
+    const pressureIcon = $('#pressureIcon');
+    pressureIndicator.className = `pressure-indicator pressure-${isBrushing ? pressureKey : 'idle'}`;
+    pressureIndicator.setAttribute('aria-label', isBrushing ? pressure[0] : 'Pressure ready');
+    pressureIcon.textContent = allComplete ? '✓' : calibration.active && position.calibration_target ? position.calibration_target : isBrushing ? pressure[4] : '•';
 
     const pacer = Number(brush.pacer_sector) || 0;
     const pacerTotal = brush.pacer_sector_count || '—';
     const activeSurface = Number(position.active_surface) || 0;
     surfaces.forEach((surface, index) => {
-      surface.classList.remove('partial', 'complete', 'active', 'calibration-target');
-      if (coverage[index] >= 95) surface.classList.add('complete');
+      const surfaceCoverage = Math.max(0, Math.min(100, Number(coverage[index]) || 0));
+      surface.classList.remove('partial', 'complete', 'active', 'active-complete', 'calibration-target');
+      surface.style.setProperty('--surface-color', coverageColor(surfaceCoverage));
+      if (surfaceCoverage >= 100) surface.classList.add('complete');
       else if (coverage[index] > 0) surface.classList.add('partial');
-      if (activeSurface === index + 1) surface.classList.add('active');
+      if (activeSurface === index + 1 && (isBrushing || calibration.active)) {
+        surface.classList.add(surfaceCoverage >= 100 ? 'active-complete' : 'active');
+      }
       if (Number(position.calibration_target) === index + 1) surface.classList.add('calibration-target');
     });
 
-    if (position.status === 'simulated') {
-      const average = coverage.reduce((sum, value) => sum + value, 0) / 16;
-      $('#coverageValue').textContent = `${Math.round(average)}%`;
-      $('#coverageLabel').textContent = 'coverage';
-      $('#surfaceDetail').textContent = `Demo surface ${activeSurface} of 16`;
-      $('#positionBadge').textContent = 'SIMULATED POSITION';
-      $('#positionBadge').classList.add('simulated');
-    } else if (calibration.active) {
+    if (calibration.active) {
       $('#coverageValue').textContent = `${calibration.completed_surfaces || 0}/16`;
-      $('#coverageLabel').textContent = 'calibrated';
-      $('#surfaceDetail').textContent = calibration.current_label || 'Waiting for brush';
-      $('#positionBadge').textContent = calibration.brushing ? 'CALIBRATING POSITION' : 'TURN BRUSH ON';
-      $('#positionBadge').classList.remove('simulated');
-    } else if (calibration.trained) {
-      const average = coverage.reduce((sum, value) => sum + value, 0) / 16;
-      $('#coverageValue').textContent = `${Math.round(average)}%`;
-      $('#coverageLabel').textContent = 'coverage';
-      const confidence = Math.round((position.confidence || 0) * 100);
-      $('#surfaceDetail').textContent = activeSurface ? `${surfaces[activeSurface - 1].getAttribute('aria-label')} · ${confidence}%` : brush.brushing ? 'Finding physical position…' : 'Position model ready';
-      $('#positionBadge').textContent = activeSurface ? 'LIVE PHYSICAL POSITION' : 'POSITION READY';
-      $('#positionBadge').classList.remove('simulated');
-    } else {
+    } else if (!calibration.trained && position.status !== 'simulated') {
       $('#coverageValue').textContent = '—';
-      $('#coverageLabel').textContent = 'position';
-      $('#surfaceDetail').textContent = 'Run one guided calibration';
-      $('#positionBadge').textContent = brush.motion_packet_count ? 'CALIBRATION REQUIRED' : 'POSITION AWAITING DATA';
-      $('#positionBadge').classList.remove('simulated');
+      pressureIcon.textContent = brush.motion_packet_count ? '!' : '?';
     }
 
     $('#metricPressure').textContent = pressure[1];
@@ -330,7 +341,12 @@
       brush.elapsed_seconds = Math.floor(this.elapsed);
       brush.brushing = this.running;
       brush.state = this.running ? 'running' : 'idle';
-      brush.pressure = this.running && Math.floor(this.elapsed) % 29 >= 22 && Math.floor(this.elapsed) % 29 < 26 ? 'high' : 'normal';
+      const pressurePhase = Math.floor(this.elapsed) % 30;
+      brush.pressure = this.running && pressurePhase >= 8 && pressurePhase < 11
+        ? 'low'
+        : this.running && pressurePhase >= 20 && pressurePhase < 24
+          ? 'high'
+          : 'normal';
       brush.pacer_sector = this.running ? Math.min(6, Math.floor(this.elapsed / 20) + 1) : 0;
       brush.pacer_sector_timer = Math.floor(this.elapsed) % 20;
       brush.position.active_surface = active;

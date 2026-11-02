@@ -37,58 +37,42 @@
     <section class="workspace">
       <div class="preview-column">
         <div class="device" aria-label="Toothbrush display preview">
-          <div class="screen">
-            <div class="screen-topline">
-              <span id="modeName">DAILY CLEAN</span>
-              <span id="batteryValue">—</span>
+          <div id="displayScreen" class="screen">
+            <div class="display-hud">
+              <div id="timer" class="timer">00:00</div>
+              <div class="coverage-readout">
+                <strong id="coverageValue">0%</strong>
+                <div class="overall-progress" aria-hidden="true"><i id="overallProgress"></i></div>
+              </div>
             </div>
-
-            <div id="timer" class="timer">00:00</div>
-            <div class="goal"><span id="goalValue">2:00</span> goal</div>
 
             <div class="mouth" id="mouth" aria-label="Sixteen mouth surfaces">
-              <div class="arch-guide upper"></div>
-              <div class="arch-guide lower"></div>
+              <svg class="mouth-map" viewBox="0 0 340 350" role="img" aria-label="Sixteen rounded brushing areas">
+                <path class="surface s0" data-z="0" data-group="1" aria-label="Upper left outside" d="M24 157 C24 101 50 61 98 36"></path>
+                <path class="surface s1" data-z="1" data-group="1" aria-label="Upper left chewing" d="M50 158 C50 117 70 87 102 69"></path>
+                <path class="surface s2" data-z="2" data-group="1" aria-label="Upper left inside" d="M76 159 C76 136 86 118 104 105"></path>
 
-              <div class="surface round s0" data-z="0" data-group="1" aria-label="Upper left outside"></div>
-              <div class="surface round s1" data-z="1" data-group="1" aria-label="Upper left chewing"></div>
-              <div class="surface round s2" data-z="2" data-group="1" aria-label="Upper left inside"></div>
+                <path class="surface s3" data-z="3" data-group="2" aria-label="Upper middle outside" d="M128 34 Q170 18 212 34"></path>
+                <path class="surface s4" data-z="4" data-group="2" aria-label="Upper middle inside" d="M128 102 Q170 87 212 102"></path>
 
-              <div class="surface bar s3" data-z="3" data-group="2" aria-label="Upper middle outside"></div>
-              <div class="surface bar s4" data-z="4" data-group="2" aria-label="Upper middle inside"></div>
+                <path class="surface s5" data-z="5" data-group="3" aria-label="Upper right inside" d="M236 105 C254 118 264 136 264 159"></path>
+                <path class="surface s6" data-z="6" data-group="3" aria-label="Upper right chewing" d="M238 69 C270 87 290 117 290 158"></path>
+                <path class="surface s7" data-z="7" data-group="3" aria-label="Upper right outside" d="M242 36 C290 61 316 101 316 157"></path>
 
-              <div class="surface round s5" data-z="5" data-group="3" aria-label="Upper right inside"></div>
-              <div class="surface round s6" data-z="6" data-group="3" aria-label="Upper right chewing"></div>
-              <div class="surface round s7" data-z="7" data-group="3" aria-label="Upper right outside"></div>
+                <path class="surface s8" data-z="8" data-group="6" aria-label="Lower left outside" d="M24 193 C24 249 50 289 98 314"></path>
+                <path class="surface s9" data-z="9" data-group="6" aria-label="Lower left chewing" d="M50 192 C50 233 70 263 102 281"></path>
+                <path class="surface s10" data-z="10" data-group="6" aria-label="Lower left inside" d="M76 191 C76 214 86 232 104 245"></path>
 
-              <div class="surface round s8" data-z="8" data-group="6" aria-label="Lower left outside"></div>
-              <div class="surface round s9" data-z="9" data-group="6" aria-label="Lower left chewing"></div>
-              <div class="surface round s10" data-z="10" data-group="6" aria-label="Lower left inside"></div>
+                <path class="surface s11" data-z="11" data-group="5" aria-label="Lower middle outside" d="M128 316 Q170 332 212 316"></path>
+                <path class="surface s12" data-z="12" data-group="5" aria-label="Lower middle inside" d="M128 248 Q170 263 212 248"></path>
 
-              <div class="surface bar s11" data-z="11" data-group="5" aria-label="Lower middle outside"></div>
-              <div class="surface bar s12" data-z="12" data-group="5" aria-label="Lower middle inside"></div>
+                <path class="surface s13" data-z="13" data-group="4" aria-label="Lower right inside" d="M236 245 C254 232 264 214 264 191"></path>
+                <path class="surface s14" data-z="14" data-group="4" aria-label="Lower right chewing" d="M238 281 C270 263 290 233 290 192"></path>
+                <path class="surface s15" data-z="15" data-group="4" aria-label="Lower right outside" d="M242 314 C290 289 316 249 316 193"></path>
+              </svg>
 
-              <div class="surface round s13" data-z="13" data-group="4" aria-label="Lower right inside"></div>
-              <div class="surface round s14" data-z="14" data-group="4" aria-label="Lower right chewing"></div>
-              <div class="surface round s15" data-z="15" data-group="4" aria-label="Lower right outside"></div>
-
-              <div class="center-label outside">Outside</div>
-              <div class="center-label chewing">Chewing</div>
-              <div class="center-label inside">Inside</div>
-              <div id="positionBadge" class="position-badge">WAITING FOR BRUSH</div>
-            </div>
-
-            <div class="screen-status">
-              <div class="pressure-group">
-                <span id="pressureDot" class="pressure-dot"></span>
-                <div>
-                  <div id="pressureText" class="pressure-main">GOOD PRESSURE</div>
-                  <div id="surfaceDetail" class="pressure-detail">No live packet yet</div>
-                </div>
-              </div>
-              <div class="coverage">
-                <strong id="coverageValue">—</strong>
-                <small id="coverageLabel">coverage</small>
+              <div id="pressureIndicator" class="pressure-indicator pressure-idle" aria-label="Pressure ready">
+                <span id="pressureIcon">•</span>
               </div>
             </div>
           </div>

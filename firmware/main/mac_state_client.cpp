@@ -11,8 +11,10 @@
 #include "esp_wifi.h"
 #include "nvs_flash.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstdio>
+#include <cctype>
 #include <cstring>
 #include <string>
 
@@ -62,6 +64,10 @@ bool MacStateClient::begin(DebugState* debug) {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
+    // The display is USB powered. Keeping Wi-Fi awake materially improves
+    // request latency while the shared 2.4 GHz radio is also carrying the
+    // toothbrush BLE connection.
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
     ESP_ERROR_CHECK(esp_wifi_connect());
     if (debug_) debug_->serverReachable = false;
     ESP_LOGI(TAG, "Connecting to Wi-Fi network '%s'", ORALB_WIFI_SSID);
@@ -94,9 +100,27 @@ bool MacStateClient::update(uint32_t nowMs, BrushSnapshot& snapshot) {
     connected_ = true;
     std::string body;
     esp_http_client_config_t config{};
-    config.url = app_config::kMacServerUrl;
+    // Include the previous rendered frame in every poll, even with no BLE
+    // packets. This makes a dead UI, sleep, and transport loss distinguishable.
+    char diagnosticsUrl[512];
+    std::snprintf(diagnosticsUrl, sizeof(diagnosticsUrl),
+        "%s?uptime_ms=%lu&render_count=%lu&render_age_ms=%lu&brightness=%d"
+        "&render_brushing=%d&render_elapsed=%lu&lock_failures=%lu&stack_free=%lu"
+        "&motion_packets=%lu&gatt=%d&refresh_count=%lu",
+        app_config::kMacServerUrl, static_cast<unsigned long>(nowMs),
+        static_cast<unsigned long>(debug_ ? debug_->renderCount : 0),
+        static_cast<unsigned long>(debug_ ? nowMs - debug_->renderedAtMs : 0),
+        debug_ ? debug_->displayBrightness : -1,
+        debug_ ? debug_->renderedBrushing : 0,
+        static_cast<unsigned long>(debug_ ? debug_->renderedElapsed : 0),
+        static_cast<unsigned long>(debug_ ? debug_->renderLockFailures : 0),
+        static_cast<unsigned long>(debug_ ? debug_->stackFreeBytes : 0),
+        static_cast<unsigned long>(debug_ ? debug_->motionPackets : 0),
+        debug_ ? debug_->gattConnected : 0,
+        static_cast<unsigned long>(debug_ ? debug_->refreshCount.load() : 0));
+    config.url = diagnosticsUrl;
     config.method = HTTP_METHOD_GET;
-    config.timeout_ms = 350;
+    config.timeout_ms = 2000;
     config.buffer_size = 4096;
     config.buffer_size_tx = 512;
     config.keep_alive_enable = false;
@@ -126,6 +150,7 @@ bool MacStateClient::update(uint32_t nowMs, BrushSnapshot& snapshot) {
         return cJSON_IsNumber(value) ? value->valueint : fallback;
     };
     snapshot.valid = cJSON_IsTrue(cJSON_GetObjectItem(brush, "valid"));
+    snapshot.serverState = true;
     snapshot.brushing = cJSON_IsTrue(cJSON_GetObjectItem(brush, "brushing"));
     snapshot.elapsedSeconds = static_cast<uint32_t>(number(brush, "elapsed_seconds", 0));
     snapshot.modeRaw = static_cast<uint8_t>(number(brush, "mode_raw", 0));
@@ -147,8 +172,15 @@ bool MacStateClient::update(uint32_t nowMs, BrushSnapshot& snapshot) {
         }
     }
     const char* pressure = cJSON_GetStringValue(cJSON_GetObjectItem(brush, "pressure"));
-    snapshot.pressure = pressure && std::strcmp(pressure, "high") == 0 ? Pressure::High
-        : pressure && std::strcmp(pressure, "low") == 0 ? Pressure::Low : Pressure::Normal;
+    std::string normalizedPressure = pressure ? pressure : "";
+    std::transform(
+        normalizedPressure.begin(),
+        normalizedPressure.end(),
+        normalizedPressure.begin(),
+        [](unsigned char value) { return static_cast<char>(std::tolower(value)); }
+    );
+    snapshot.pressure = normalizedPressure == "high" ? Pressure::High
+        : normalizedPressure == "low" ? Pressure::Low : Pressure::Normal;
     cJSON* active = cJSON_GetObjectItem(position, "active_surface");
     snapshot.activeSurface = cJSON_IsNumber(active)
         ? static_cast<int8_t>(active->valueint - 1) : -1;
@@ -176,7 +208,7 @@ bool MacStateClient::reset(uint32_t nowMs) {
     esp_http_client_config_t config{};
     config.url = app_config::kMacResetUrl;
     config.method = HTTP_METHOD_POST;
-    config.timeout_ms = 500;
+    config.timeout_ms = 2000;
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) return false;
     esp_err_t err = esp_http_client_perform(client);
@@ -222,7 +254,7 @@ bool MacStateClient::publish(const BrushSnapshot* snapshots, size_t count) {
     esp_http_client_config_t config{};
     config.url = app_config::kMacIngestUrl;
     config.method = HTTP_METHOD_POST;
-    config.timeout_ms = 500;
+    config.timeout_ms = 2000;
     config.buffer_size = 4096;
     config.keep_alive_enable = false;
     esp_http_client_handle_t client = esp_http_client_init(&config);

@@ -5,7 +5,7 @@
 
 class BrushModel {
 public:
-    BrushModel();
+    explicit BrushModel(bool serverAuthoritative = false);
 
     void reset();
     void apply(const BrushSnapshot& snapshot);
@@ -14,6 +14,7 @@ public:
     const BrushState& state() const { return state_; }
 
 private:
+    bool serverAuthoritative_;
     BrushState state_;
     uint32_t anchorSeconds_ = 0;
     uint32_t anchorMs_ = 0;

@@ -271,8 +271,10 @@ class PositionEngine:
 
     def set_brushing(self, brushing: bool) -> None:
         if brushing and not self._was_brushing:
-            if not self.calibration_active:
-                self.coverage = [0.0] * 16
+            # Transport-level brushing edges are deliberately not session
+            # boundaries. A brief FF0D dropout must not erase coverage.
+            # The bridge calls reset_session() only for an explicit reset or
+            # after a genuinely long idle period.
             self._reset_stream(keep_timestamp=True)
         elif not brushing and self._was_brushing:
             self.active_surface = None
